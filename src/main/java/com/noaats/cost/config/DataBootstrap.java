@@ -42,19 +42,22 @@ public class DataBootstrap implements CommandLineRunner {
     @Override
     public void run(String... args) {
         migrateAllocationKind();
-        // If departments don't match our 20, wipe everything and re-seed (handles data-h2.sql conflict)
         if (deptRepo.count() < 20) {
-            log.info("Clearing stale seed data...");
-            jdbc.execute("SET REFERENTIAL_INTEGRITY FALSE");
-            jdbc.execute("DELETE FROM audit_log");
-            jdbc.execute("DELETE FROM cost_allocation");
-            jdbc.execute("DELETE FROM cost_item");
-            jdbc.execute("DELETE FROM timesheet");
-            jdbc.execute("DELETE FROM standard_rate");
-            jdbc.execute("DELETE FROM employee");
-            jdbc.execute("DELETE FROM project");
-            jdbc.execute("DELETE FROM department");
-            jdbc.execute("SET REFERENTIAL_INTEGRITY TRUE");
+            // On H2 (local), data-h2.sql may have seeded conflicting data — wipe it
+            try {
+                jdbc.execute("SET REFERENTIAL_INTEGRITY FALSE");
+                jdbc.execute("DELETE FROM audit_log");
+                jdbc.execute("DELETE FROM cost_allocation");
+                jdbc.execute("DELETE FROM cost_item");
+                jdbc.execute("DELETE FROM timesheet");
+                jdbc.execute("DELETE FROM standard_rate");
+                jdbc.execute("DELETE FROM employee");
+                jdbc.execute("DELETE FROM project");
+                jdbc.execute("DELETE FROM department");
+                jdbc.execute("SET REFERENTIAL_INTEGRITY TRUE");
+            } catch (Exception e) {
+                log.debug("H2 cleanup skipped (not H2): {}", e.getMessage());
+            }
             seedDepartments();
         }
         if (userRepo.count() == 0) seedUsers();
