@@ -28,18 +28,14 @@ public class CostService {
     private final CostAllocationRepository allocationRepo;
     private final AuditService audit;
 
-    /** Only approved timesheets count as actual cost. */
+    /** Only approved timesheets count as actual cost. Uses fetch-join to avoid N+1. */
     private List<Timesheet> approvedTimesheets(String yearMonth) {
         YearMonth ym = YearMonth.parse(yearMonth);
-        LocalDate start = ym.atDay(1);
-        LocalDate end = ym.atEndOfMonth();
-        return timesheetRepo.findByWorkDateBetween(start, end).stream()
-                .filter(t -> t.getStatus() == Timesheet.Status.APPROVED)
-                .toList();
+        return timesheetRepo.findApprovedWithJoin(ym.atDay(1), ym.atEndOfMonth());
     }
 
     /**
-     * Approved timesheets filtered by scope.
+     * Approved timesheets filtered by scope. Uses fetch-join queries.
      *   MONTHLY  → selected month only
      *   ANNUAL   → full selected year
      *   ALL_TIME → every approved timesheet
@@ -47,9 +43,7 @@ public class CostService {
     private List<Timesheet> approvedInScope(String yearMonth, String scope) {
         String s = scope == null ? "MONTHLY" : scope.toUpperCase();
         if ("ALL_TIME".equals(s)) {
-            return timesheetRepo.findAll().stream()
-                    .filter(t -> t.getStatus() == Timesheet.Status.APPROVED)
-                    .toList();
+            return timesheetRepo.findAllApprovedWithJoin();
         }
         YearMonth ym = YearMonth.parse(yearMonth);
         LocalDate start, end;
@@ -60,9 +54,7 @@ public class CostService {
             start = ym.atDay(1);
             end = ym.atEndOfMonth();
         }
-        return timesheetRepo.findByWorkDateBetween(start, end).stream()
-                .filter(t -> t.getStatus() == Timesheet.Status.APPROVED)
-                .toList();
+        return timesheetRepo.findApprovedWithJoin(start, end);
     }
 
     public List<CostAggregateRow> aggregate(String yearMonth, String level) {
@@ -357,16 +349,15 @@ public class CostService {
         if ("MONTHLY".equals(s)) {
             YearMonth end = YearMonth.parse(yearMonth);
             YearMonth start = end.minusMonths(11);
-            windowTimesheets = timesheetRepo.findByWorkDateBetween(
+            windowTimesheets = timesheetRepo.findApprovedWithJoin(
                     start.atDay(1), end.atEndOfMonth());
         } else if ("ANNUAL".equals(s)) {
             windowTimesheets = approvedInScope(yearMonth, "ANNUAL");
         } else {
-            windowTimesheets = timesheetRepo.findAll();
+            windowTimesheets = timesheetRepo.findAllApprovedWithJoin();
         }
         for (Timesheet t : windowTimesheets) {
-            if (t.getStatus() == Timesheet.Status.APPROVED)
-                activeProjectIds.add(t.getProject().getId());
+            activeProjectIds.add(t.getProject().getId());
         }
         BigDecimal annualBudget = projectRepo.findAll().stream()
                 .filter(p -> activeProjectIds.contains(p.getId()))
@@ -381,10 +372,8 @@ public class CostService {
             YearMonth start = end.minusMonths(11);
 
             Map<String, BigDecimal> byYm = new TreeMap<>();
-            LocalDate startDate = start.atDay(1);
-            LocalDate endDate = end.atEndOfMonth();
-            for (Timesheet t : timesheetRepo.findByWorkDateBetween(startDate, endDate)) {
-                if (t.getStatus() != Timesheet.Status.APPROVED) continue;
+            // Reuse the already-loaded windowTimesheets (approved, fetch-joined)
+            for (Timesheet t : windowTimesheets) {
                 String key = String.format("%04d-%02d",
                         t.getWorkDate().getYear(), t.getWorkDate().getMonthValue());
                 BigDecimal c = t.getHours().multiply(t.getEmployee().getHourlyRate());
@@ -442,8 +431,7 @@ public class CostService {
 
         // ALL_TIME: group by year (yearly totals vs annual budget)
         Map<Integer, BigDecimal> byYear = new TreeMap<>();
-        for (Timesheet t : timesheetRepo.findAll()) {
-            if (t.getStatus() != Timesheet.Status.APPROVED) continue;
+        for (Timesheet t : windowTimesheets) {
             BigDecimal c = t.getHours().multiply(t.getEmployee().getHourlyRate());
             byYear.merge(t.getWorkDate().getYear(), c, BigDecimal::add);
         }

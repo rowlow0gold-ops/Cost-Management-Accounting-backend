@@ -17,6 +17,17 @@ public interface TimesheetRepository extends JpaRepository<Timesheet, Long> {
     List<Timesheet> findAllByOrderByWorkDateDescIdDesc();
     List<Timesheet> findByEmployeeId(Long employeeId);
 
+    /** Fetch-joined approved timesheets in date range — avoids N+1 and loads only APPROVED */
+    @Query("SELECT t FROM Timesheet t JOIN FETCH t.employee JOIN FETCH t.project " +
+           "WHERE t.status = 'APPROVED' AND t.workDate BETWEEN :start AND :end")
+    List<Timesheet> findApprovedWithJoin(@Param("start") LocalDate start,
+                                         @Param("end") LocalDate end);
+
+    /** All approved timesheets with fetch joins */
+    @Query("SELECT t FROM Timesheet t JOIN FETCH t.employee JOIN FETCH t.project " +
+           "WHERE t.status = 'APPROVED'")
+    List<Timesheet> findAllApprovedWithJoin();
+
     @Query("SELECT t FROM Timesheet t LEFT JOIN t.employee e LEFT JOIN t.project p WHERE " +
            "(:status IS NULL OR t.status = :status) AND " +
            "(:keyword IS NULL OR :keyword = '' OR " +
