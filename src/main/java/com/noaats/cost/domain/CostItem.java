@@ -6,7 +6,11 @@ import lombok.*;
 import java.math.BigDecimal;
 
 @Entity
-@Table(name = "cost_item")
+@Table(name = "cost_item",
+       indexes = {
+           @Index(name = "idx_ci_ym", columnList = "year_month_val"),
+           @Index(name = "idx_ci_ym_dept", columnList = "year_month_val, department_id")
+       })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
 public class CostItem {

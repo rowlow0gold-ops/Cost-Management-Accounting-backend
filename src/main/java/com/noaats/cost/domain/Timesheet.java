@@ -11,7 +11,11 @@ import java.time.LocalDateTime;
 @Table(name = "timesheet",
        indexes = {
            @Index(name = "idx_ts_work_date", columnList = "work_date"),
-           @Index(name = "idx_ts_emp_proj", columnList = "employee_id, project_id")
+           @Index(name = "idx_ts_status", columnList = "status"),
+           @Index(name = "idx_ts_status_date", columnList = "status, work_date"),
+           @Index(name = "idx_ts_emp_proj", columnList = "employee_id, project_id"),
+           @Index(name = "idx_ts_emp_status", columnList = "employee_id, status"),
+           @Index(name = "idx_ts_proj_status", columnList = "project_id, status")
        })
 @Getter @Setter
 @NoArgsConstructor @AllArgsConstructor @Builder
