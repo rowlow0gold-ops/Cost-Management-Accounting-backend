@@ -240,7 +240,7 @@ public class DataBootstrap implements CommandLineRunner {
         for (int mi = 0; mi < MONTHS.length; mi++)
             for (int gi = 0; gi < GRADES.length; gi++)
                 rows.add(new Object[]{MONTHS[mi], GRADES[gi], BigDecimal.valueOf(rt[mi][gi])});
-        jdbc.batchUpdate("INSERT INTO standard_rate (year_month, grade, hourly_rate) VALUES (?,?,?)",
+        jdbc.batchUpdate("INSERT INTO standard_rate (year_month_val, grade, hourly_rate) VALUES (?,?,?)",
             rows, 100, (ps, row) -> {
                 ps.setString(1,(String)row[0]); ps.setString(2,(String)row[1]); ps.setBigDecimal(3,(BigDecimal)row[2]);
             });
@@ -366,7 +366,7 @@ public class DataBootstrap implements CommandLineRunner {
                     rows.add(new Object[]{ym, "INDIRECT", depts.get(di).getId(), cats[ci],
                         BigDecimal.valueOf((long)(amounts[di][ci] * 10000 * v))});
                 }
-        jdbc.batchUpdate("INSERT INTO cost_item (year_month, type, department_id, category, amount) VALUES (?,?,?,?,?)",
+        jdbc.batchUpdate("INSERT INTO cost_item (year_month_val, type, department_id, category, amount) VALUES (?,?,?,?,?)",
             rows, 500, (ps, row) -> {
                 ps.setString(1,(String)row[0]); ps.setString(2,(String)row[1]); ps.setLong(3,(Long)row[2]);
                 ps.setString(4,(String)row[3]); ps.setBigDecimal(5,(BigDecimal)row[4]);
@@ -412,7 +412,7 @@ public class DataBootstrap implements CommandLineRunner {
                     transferMemos[alRng.nextInt(transferMemos.length)]+" ("+h+"h × "+String.format("%,d",r)+"원)", transTs});
             }
         }
-        jdbc.batchUpdate("INSERT INTO cost_allocation (year_month, source_department_id, target_project_id, target_department_id, basis, amount, kind, memo, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        jdbc.batchUpdate("INSERT INTO cost_allocation (year_month_val, source_department_id, target_project_id, target_department_id, basis, amount, kind, memo, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
             all, 500, (ps, row) -> {
                 ps.setString(1,(String)row[0]); ps.setLong(2,(Long)row[1]);
                 if (row[2]!=null) ps.setLong(3,(Long)row[2]); else ps.setNull(3, java.sql.Types.BIGINT);
