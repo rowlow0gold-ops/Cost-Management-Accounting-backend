@@ -187,6 +187,10 @@ public class CostService {
         return saved;
     }
 
+    public List<CostAllocation> transfers(String yearMonth) {
+        return allocationRepo.findByYearMonthAndKind(yearMonth, CostAllocation.AllocationKind.TRANSFER);
+    }
+
     @Transactional
     public CostAllocation transfer(TransferRequest req) {
         if (req.getSourceDepartmentId() == null || req.getTargetDepartmentId() == null)

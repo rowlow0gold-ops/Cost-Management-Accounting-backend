@@ -2,11 +2,15 @@ package com.noaats.cost.controller;
 
 import com.noaats.cost.domain.*;
 import com.noaats.cost.repository.*;
+import com.noaats.cost.service.CostItemService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/masters")
@@ -18,6 +22,7 @@ public class MastersController {
     private final ProjectRepository projRepo;
     private final StandardRateRepository rateRepo;
     private final CostItemRepository costItemRepo;
+    private final CostItemService costItemService;
 
     // ----- Departments
     @GetMapping("/departments")
@@ -92,4 +97,28 @@ public class MastersController {
     @PostMapping("/cost-items")
     @PreAuthorize("hasRole('ADMIN')")
     public CostItem costItemCreate(@RequestBody CostItem c) { return costItemRepo.save(c); }
+
+    @PostMapping("/cost-items/validate")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    public ResponseEntity<?> validateCostItems(@RequestParam("file") MultipartFile file) {
+        try {
+            int count = costItemService.validateExcel(file);
+            return ResponseEntity.ok(Map.of("valid", count, "message", count + "건 검증 완료"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/cost-items/import")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    public ResponseEntity<?> importCostItems(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "mode", defaultValue = "MERGE") String mode) {
+        try {
+            int count = costItemService.importFromExcel(file, mode);
+            return ResponseEntity.ok(Map.of("imported", count, "message", count + "건이 등록되었습니다."));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
 }

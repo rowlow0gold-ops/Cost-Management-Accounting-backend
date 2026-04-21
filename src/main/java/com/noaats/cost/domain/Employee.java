@@ -23,7 +23,7 @@ public class Employee {
     @Column(nullable = false, length = 30)
     private String grade;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "department_id", nullable = false)
     private Department department;
 

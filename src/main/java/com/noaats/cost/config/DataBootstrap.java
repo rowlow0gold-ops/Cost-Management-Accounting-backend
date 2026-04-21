@@ -152,17 +152,26 @@ public class DataBootstrap implements CommandLineRunner {
             .findFirst().orElse(null);
         if (senior == null) return;
 
-        timesheetRepo.save(Timesheet.builder()
-            .employee(senior)
-            .project(overBudget)
-            .workDate(LocalDate.of(2026, 1, 15))
-            .hours(new BigDecimal("400"))
-            .memo("[DEMO: 예산초과] 긴급 투입 400h")
-            .status(Timesheet.Status.APPROVED)
-            .submittedAt(LocalDateTime.of(2026, 1, 15, 18, 0))
-            .approvedAt(LocalDateTime.of(2026, 1, 16, 9, 0))
-            .approvedByEmail("manager@noaats.com")
-            .build());
+        // Spread 400h across 50 work days (8h each) in Jan 2026
+        int remaining = 400;
+        int day = 2;
+        while (remaining > 0 && day <= 28) {
+            int h = Math.min(remaining, 8);
+            LocalDate date = LocalDate.of(2026, 1, day);
+            timesheetRepo.save(Timesheet.builder()
+                .employee(senior)
+                .project(overBudget)
+                .workDate(date)
+                .hours(BigDecimal.valueOf(h))
+                .memo("[DEMO: 예산초과] 긴급 투입")
+                .status(Timesheet.Status.APPROVED)
+                .submittedAt(date.atTime(18, 0))
+                .approvedAt(date.plusDays(1).atTime(9, 0))
+                .approvedByEmail("manager@noaats.com")
+                .build());
+            remaining -= h;
+            day++;
+        }
     }
 
     // ── Base seed methods (run on any profile, including prod) ──────────
@@ -277,6 +286,8 @@ public class DataBootstrap implements CommandLineRunner {
 
     /**
      * Seed sample timesheets across multiple months so the dashboard has data.
+     * Each entry is a single workday with hours ≤ 8 (realistic daily timesheet).
+     * To get monthly totals, we spread hours across multiple days.
      * Skips if any APPROVED timesheets already exist (idempotent).
      */
     private void seedSampleTimesheets() {
@@ -285,7 +296,7 @@ public class DataBootstrap implements CommandLineRunner {
                         && t.getMemo() != null && !t.getMemo().contains("[DEMO: 예산초과]"));
         if (hasApproved) return;
 
-        // April 2026 — one per project
+        // April 2026 — spread across work days (each row: empId, projId, totalHours, memo)
         int[][] april = {
             {1,1,80},{3,2,75},{6,3,60},{8,4,50},
             {11,5,90},{13,6,80},{16,7,70},{18,8,65},
@@ -294,27 +305,27 @@ public class DataBootstrap implements CommandLineRunner {
             {41,17,60},{43,18,70},{46,19,55},{48,20,45},
         };
         for (int[] r : april) {
-            saveApproved(r[0], r[1], LocalDate.of(2026, 4, 2), r[2], "4월 공수");
+            spreadApproved(r[0], r[1], 2026, 4, r[2], "4월 공수");
         }
 
         // March 2026
         int[][] march = {{1,1,60},{11,5,70},{21,9,110},{31,13,65},{41,17,55}};
-        for (int[] r : march) saveApproved(r[0], r[1], LocalDate.of(2026, 3, 5), r[2], "3월 공수");
+        for (int[] r : march) spreadApproved(r[0], r[1], 2026, 3, r[2], "3월 공수");
 
         // Feb 2026
         int[][] feb = {{3,2,55},{13,6,75},{23,10,95},{33,14,60}};
-        for (int[] r : feb) saveApproved(r[0], r[1], LocalDate.of(2026, 2, 5), r[2], "2월 공수");
+        for (int[] r : feb) spreadApproved(r[0], r[1], 2026, 2, r[2], "2월 공수");
 
         // Jan 2026
         int[][] jan = {{6,3,50},{16,7,65},{26,11,85}};
-        for (int[] r : jan) saveApproved(r[0], r[1], LocalDate.of(2026, 1, 5), r[2], "1월 공수");
+        for (int[] r : jan) spreadApproved(r[0], r[1], 2026, 1, r[2], "1월 공수");
 
         // Dec 2025
         int[][] dec = {
             {1,1,40},{3,2,45},{8,4,40},{11,5,85},{13,6,70},{18,8,60},
             {21,9,110},{23,10,95},{28,12,70},{31,13,60},{36,15,50},{41,17,55},{46,19,50},
         };
-        for (int[] r : dec) saveApproved(r[0], r[1], LocalDate.of(2025, 12, r[0] % 20 + 3), r[2], "12월 공수");
+        for (int[] r : dec) spreadApproved(r[0], r[1], 2025, 12, r[2], "12월 공수");
 
         // A few SUBMITTED and DRAFT entries
         saveSubmitted(2, 1, LocalDate.of(2026, 4, 19), 6, "리서치 보조");
@@ -323,18 +334,32 @@ public class DataBootstrap implements CommandLineRunner {
         saveDraft(22, 9, LocalDate.of(2026, 4, 20), 8, "설계 검토");
     }
 
-    private void saveApproved(long empId, long projId, LocalDate date, int hours, String memo) {
+    /**
+     * Spread totalHours across multiple work days in the given month.
+     * Each day gets up to 8 hours.
+     */
+    private void spreadApproved(long empId, long projId, int year, int month, int totalHours, String memo) {
         Employee emp = employeeRepo.findById(empId).orElse(null);
         Project proj = projectRepo.findById(projId).orElse(null);
         if (emp == null || proj == null) return;
-        timesheetRepo.save(Timesheet.builder()
-            .employee(emp).project(proj).workDate(date)
-            .hours(BigDecimal.valueOf(hours)).memo(memo)
-            .status(Timesheet.Status.APPROVED)
-            .submittedAt(date.atTime(18, 0))
-            .approvedAt(date.plusDays(1).atTime(10, 0))
-            .approvedByEmail("manager@noaats.com")
-            .build());
+
+        int remaining = totalHours;
+        int day = 2; // start from 2nd of the month
+        while (remaining > 0) {
+            int h = Math.min(remaining, 8);
+            LocalDate date = LocalDate.of(year, month, day);
+            timesheetRepo.save(Timesheet.builder()
+                .employee(emp).project(proj).workDate(date)
+                .hours(BigDecimal.valueOf(h)).memo(memo)
+                .status(Timesheet.Status.APPROVED)
+                .submittedAt(date.atTime(18, 0))
+                .approvedAt(date.plusDays(1).atTime(10, 0))
+                .approvedByEmail("manager@noaats.com")
+                .build());
+            remaining -= h;
+            day++;
+            if (day > 28) break; // safety: don't exceed month
+        }
     }
 
     private void saveSubmitted(long empId, long projId, LocalDate date, int hours, String memo) {

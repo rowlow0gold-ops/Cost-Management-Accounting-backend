@@ -19,15 +19,15 @@ public class CostAllocation {
     @Column(name = "year_month_val", nullable = false, length = 7)
     private String yearMonth;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "source_department_id", nullable = false)
     private Department sourceDepartment;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "target_project_id")
     private Project targetProject;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "target_department_id")
     private Department targetDepartment;
 

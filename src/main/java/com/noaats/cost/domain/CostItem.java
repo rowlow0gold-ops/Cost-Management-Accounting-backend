@@ -21,7 +21,7 @@ public class CostItem {
     @Column(nullable = false, length = 20)
     private CostType type;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "department_id")
     private Department department;
 

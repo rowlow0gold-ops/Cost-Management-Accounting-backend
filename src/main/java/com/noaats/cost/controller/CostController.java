@@ -4,9 +4,11 @@ import com.noaats.cost.domain.CostAllocation;
 import com.noaats.cost.dto.CostDtos.*;
 import com.noaats.cost.dto.CostDtos.TimeSeriesPoint;
 import com.noaats.cost.service.CostService;
+import com.noaats.cost.service.TransferImportService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -16,6 +18,7 @@ import java.util.List;
 public class CostController {
 
     private final CostService costService;
+    private final TransferImportService transferImport;
 
     @GetMapping("/aggregate")
     public List<CostAggregateRow> aggregate(
@@ -32,10 +35,30 @@ public class CostController {
         return costService.allocate(req);
     }
 
+    @GetMapping("/transfers")
+    public List<CostAllocation> transfers(@RequestParam String yearMonth) {
+        return costService.transfers(yearMonth);
+    }
+
     @PostMapping("/transfer")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
     public CostAllocation transfer(@RequestBody TransferRequest req) {
         return costService.transfer(req);
+    }
+
+    @PostMapping("/transfers/validate")
+    public java.util.Map<String, Object> validateTransfers(@RequestParam("file") MultipartFile file) throws java.io.IOException {
+        int valid = transferImport.validateExcel(file);
+        return java.util.Map.of("valid", valid);
+    }
+
+    @PostMapping("/transfers/import")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    public java.util.Map<String, Object> importTransfers(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(defaultValue = "MERGE") String mode) throws java.io.IOException {
+        int count = transferImport.importFromExcel(file, mode);
+        return java.util.Map.of("message", count + "건 등록 완료", "imported", count);
     }
 
     @GetMapping("/variance")

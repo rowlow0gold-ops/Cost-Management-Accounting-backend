@@ -43,6 +43,64 @@ public class ExportController {
             .body(body);
     }
 
+    @GetMapping("/timesheets.xlsx")
+    public ResponseEntity<byte[]> timesheets(
+            @RequestParam(required = false) String status) throws IOException {
+        byte[] body = excel.exportTimesheets(status);
+        String filename = "timesheets" + (status != null ? "_" + status : "") + ".xlsx";
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+            .contentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .body(body);
+    }
+
+    @GetMapping("/allocations.xlsx")
+    public ResponseEntity<byte[]> allocations(
+            @RequestParam String yearMonth) throws IOException {
+        byte[] body = excel.exportAllocations(yearMonth);
+        String filename = "allocations_" + yearMonth + ".xlsx";
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+            .contentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .body(body);
+    }
+
+    @GetMapping("/transfers.xlsx")
+    public ResponseEntity<byte[]> transfers(
+            @RequestParam(required = false) String yearMonth) throws IOException {
+        byte[] body = excel.exportTransfers(yearMonth);
+        String filename = "transfers" + (yearMonth != null ? "_" + yearMonth : "") + ".xlsx";
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+            .contentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .body(body);
+    }
+
+    @GetMapping("/cost-items.xlsx")
+    public ResponseEntity<byte[]> costItems(
+            @RequestParam(required = false) String yearMonth) throws IOException {
+        byte[] body = excel.exportCostItems(yearMonth);
+        String filename = "cost_items" + (yearMonth != null ? "_" + yearMonth : "") + ".xlsx";
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+            .contentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .body(body);
+    }
+
+    @GetMapping("/audit.xlsx")
+    public ResponseEntity<byte[]> audit() throws IOException {
+        byte[] body = excel.exportAuditLogs();
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"audit_log.xlsx\"")
+            .contentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+            .body(body);
+    }
+
     @GetMapping("/variance.xlsx")
     public ResponseEntity<byte[]> variance(
             @RequestParam String yearMonth,

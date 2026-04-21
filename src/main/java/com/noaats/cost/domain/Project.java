@@ -21,7 +21,7 @@ public class Project {
     @Column(nullable = false, length = 200)
     private String name;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "owner_department_id", nullable = false)
     private Department ownerDepartment;
 
