@@ -8,10 +8,20 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Random;
+import java.util.*;
+import java.util.stream.Collectors;
 
+/**
+ * Realistic demo data for a medium-sized financial company (~150 employees).
+ * Covers 12 months (2025-07 → 2026-06) with timesheets, cost items,
+ * allocations, transfers, and audit logs.
+ *
+ * Idempotent: each section checks before inserting.
+ */
 @Configuration
 @RequiredArgsConstructor
 public class DataBootstrap implements CommandLineRunner {
@@ -23,21 +33,45 @@ public class DataBootstrap implements CommandLineRunner {
     private final TimesheetRepository timesheetRepo;
     private final PasswordEncoder encoder;
     private final StandardRateRepository rateRepo;
+    private final CostAllocationRepository allocationRepo;
+    private final CostItemRepository costItemRepo;
+    private final AuditLogRepository auditLogRepo;
+
+    private final Random rng = new Random(42); // deterministic
 
     @Override
     public void run(String... args) {
+        migrateAllocationKind();
         if (deptRepo.count() == 0) seedDepartments();
-        if (employeeRepo.count() == 0) seedBaseEmployees();
-        if (projectRepo.count() == 0) seedBaseProjects();
-        if (rateRepo.count() == 0) seedStandardRates();
         if (userRepo.count() == 0) seedUsers();
-        if (employeeRepo.count() < 110) seedMoreEmployees();
-        if (projectRepo.count() < 120) seedMoreProjects();
-        randomizeProjectPeriods();
-        seedOverBudgetExample();
-        seedSampleTimesheets();
+        if (employeeRepo.count() < 140) seedEmployees();
+        if (projectRepo.count() < 30) seedProjects();
+        if (rateRepo.count() == 0) seedStandardRates();
+        if (timesheetRepo.count() < 1000) seedTimesheets();
+        if (costItemRepo.count() < 50) seedCostItems();
+        if (allocationRepo.count() < 20) seedAllocations();
+        if (auditLogRepo.count() < 50) seedAuditLogs();
     }
 
+    // ───────────────────── Departments (8) ─────────────────────
+    private static final String[][] DEPT_DATA = {
+        {"HQ1", "경영기획본부"},
+        {"HQ2", "자산운용본부"},
+        {"HQ3", "IT본부"},
+        {"HQ4", "리스크관리본부"},
+        {"HQ5", "컴플라이언스본부"},
+        {"HQ6", "재무회계본부"},
+        {"HQ7", "인사총무본부"},
+        {"HQ8", "디지털혁신본부"},
+    };
+
+    private void seedDepartments() {
+        for (String[] d : DEPT_DATA) {
+            deptRepo.save(Department.builder().code(d[0]).name(d[1]).build());
+        }
+    }
+
+    // ───────────────────── Users ─────────────────────
     private void seedUsers() {
         String hash = encoder.encode("password123");
         userRepo.save(User.builder()
@@ -51,337 +85,485 @@ public class DataBootstrap implements CommandLineRunner {
             .role(Role.USER).department(deptRepo.findById(3L).orElse(null)).build());
     }
 
-    private void seedMoreEmployees() {
-        // Add employees 51 ~ 110 (12 per department, 5 depts => 60 extras).
-        String[] grades = {"사원","사원","대리","대리","과장","과장","과장","차장","차장","부장","부장","부장"};
-        BigDecimal[] rates = {
-            new BigDecimal("25000"), new BigDecimal("25000"),
-            new BigDecimal("35000"), new BigDecimal("35000"),
-            new BigDecimal("50000"), new BigDecimal("50000"), new BigDecimal("50000"),
-            new BigDecimal("65000"), new BigDecimal("65000"),
-            new BigDecimal("85000"), new BigDecimal("85000"), new BigDecimal("85000")
-        };
-        int seq = 51;
-        for (long deptId = 1; deptId <= 5; deptId++) {
-            Department d = deptRepo.findById(deptId).orElse(null);
-            if (d == null) continue;
-            for (int i = 0; i < 12; i++) {
+    // ───────────────────── Employees (~150) ─────────────────────
+
+    private static final String[] LAST_NAMES = {
+        "김","이","박","최","정","강","조","윤","임","한",
+        "오","신","홍","송","문","노","구","유","곽","백",
+        "권","전","류","서","남","채","지","우","안","배",
+        "심","석","민","도","함","진","피","감","반","금",
+        "단","갈","맹","설","방","탁","모","여","하","변",
+    };
+    private static final String[] FIRST_NAMES = {
+        "민수","영희","지훈","서연","우진","하늘","민재","서아","도현","지민",
+        "은서","유진","기범","채원","수아","태현","민호","나래","재훈","승호",
+        "다은","소희","준영","가영","현우","윤석","은별","상현","세빈","준혁",
+        "예린","미라","호준","가현","재민","은수","세호","리아","지효","영준",
+        "수현","혁진","지현","정훈","선아","하은","우빈","예진","승현","경한",
+        "시우","유나","준서","하린","도윤","서율","주원","수빈","연우","하율",
+    };
+
+    private static final String[] GRADES = {"사원","대리","과장","차장","부장"};
+    private static final int[] GRADE_RATES = {25000, 35000, 50000, 65000, 85000};
+    // Distribution per dept: ~40% 사원, ~25% 대리, ~18% 과장, ~10% 차장, ~7% 부장
+    private static final double[] GRADE_DIST = {0.40, 0.25, 0.18, 0.10, 0.07};
+
+    private void seedEmployees() {
+        List<Department> depts = deptRepo.findAll();
+        // Target: 16~22 per dept ≈ 150 total
+        int[] perDept = {20, 22, 24, 18, 16, 18, 16, 16};
+        int seq = 1;
+        int nameIdx = 0;
+        for (int di = 0; di < depts.size() && di < perDept.length; di++) {
+            Department dept = depts.get(di);
+            int count = perDept[di];
+            for (int i = 0; i < count; i++) {
                 String empNo = String.format("E%04d", seq);
-                if (employeeRepo.findAll().stream().anyMatch(e -> e.getEmpNo().equals(empNo))) {
-                    seq++; continue;
+                // check dup
+                final String checkNo = empNo;
+                if (employeeRepo.findAll().stream().anyMatch(e -> e.getEmpNo().equals(checkNo))) {
+                    seq++; nameIdx++; continue;
                 }
+                int gradeIdx = pickGrade();
+                String name = LAST_NAMES[nameIdx % LAST_NAMES.length]
+                    + FIRST_NAMES[nameIdx % FIRST_NAMES.length];
                 employeeRepo.save(Employee.builder()
                     .empNo(empNo)
-                    .name("추가직원" + seq)
-                    .grade(grades[i])
-                    .department(d)
-                    .hourlyRate(rates[i])
+                    .name(name)
+                    .grade(GRADES[gradeIdx])
+                    .department(dept)
+                    .hourlyRate(BigDecimal.valueOf(GRADE_RATES[gradeIdx] + rng.nextInt(5) * 1000))
                     .build());
                 seq++;
+                nameIdx++;
             }
         }
     }
 
-    private void seedMoreProjects() {
-        // Add projects 21 ~ 120 (20 existing + 100 extras).
-        for (int i = 21; i <= 120; i++) {
-            String code = String.format("PRJ-%03d", i);
-            if (projectRepo.findAll().stream().anyMatch(p -> p.getCode().equals(code))) continue;
-            long deptId = ((i - 1) % 5) + 1;
-            Department d = deptRepo.findById(deptId).orElse(null);
-            if (d == null) continue;
-            projectRepo.save(Project.builder()
-                .code(code)
-                .name("추가 프로젝트 " + i)
-                .ownerDepartment(d)
-                .budgetHours(BigDecimal.valueOf(1000L + (i * 10L)))
-                .budgetCost(BigDecimal.valueOf(60_000_000L + (i * 500_000L)))
-                .startDate(LocalDate.of(2025, 1, 1))
-                .endDate(LocalDate.of(2026, 12, 31))
-                .build());
+    private int pickGrade() {
+        double r = rng.nextDouble();
+        double cum = 0;
+        for (int i = 0; i < GRADE_DIST.length; i++) {
+            cum += GRADE_DIST[i];
+            if (r < cum) return i;
         }
+        return 0;
     }
 
-    /**
-     * Give each project a different start date and duration.
-     * Deterministic (seeded Random) so the demo is stable across restarts.
-     * Only runs once — checks if every project still has the default span.
-     */
-    private void randomizeProjectPeriods() {
-        LocalDate defaultStart = LocalDate.of(2025, 1, 1);
-        LocalDate defaultEnd = LocalDate.of(2026, 12, 31);
-        boolean allDefault = projectRepo.findAll().stream().allMatch(p ->
-            defaultStart.equals(p.getStartDate()) && defaultEnd.equals(p.getEndDate()));
-        if (!allDefault) return; // already randomized before
+    // ───────────────────── Projects (35) ─────────────────────
 
-        Random r = new Random(42);
-        for (Project p : projectRepo.findAll()) {
-            int startYear = 2024 + r.nextInt(2);          // 2024 or 2025
-            int startMonth = 1 + r.nextInt(12);           // 1..12
-            int durationMonths = 6 + r.nextInt(19);       // 6..24
+    private static final String[][] PROJECT_DATA = {
+        // code, name, deptCode, budgetHours, budgetCost(만)
+        {"PRJ-001","경영전략 수립","HQ1","1600","10000"},
+        {"PRJ-002","중장기 사업계획","HQ1","1400","9000"},
+        {"PRJ-003","예산편성 시스템","HQ1","1200","8000"},
+        {"PRJ-004","조직혁신 프로젝트","HQ1","1000","7000"},
+        {"PRJ-005","자산배분 모델링","HQ2","1800","12000"},
+        {"PRJ-006","대체투자 운용","HQ2","1600","11000"},
+        {"PRJ-007","글로벌 펀드 운용","HQ2","1500","10500"},
+        {"PRJ-008","채권 포트폴리오 최적화","HQ2","1400","9500"},
+        {"PRJ-009","코어뱅킹 차세대","HQ3","2400","18000"},
+        {"PRJ-010","클라우드 마이그레이션","HQ3","2000","15000"},
+        {"PRJ-011","데이터 플랫폼 구축","HQ3","1800","14000"},
+        {"PRJ-012","보안관제 고도화","HQ3","1500","11000"},
+        {"PRJ-013","VaR 모델 개선","HQ4","1400","9500"},
+        {"PRJ-014","신용리스크 관리","HQ4","1300","9000"},
+        {"PRJ-015","시장리스크 한도관리","HQ4","1200","8500"},
+        {"PRJ-016","스트레스 테스트","HQ4","1100","8000"},
+        {"PRJ-017","내부통제 점검","HQ5","1200","8500"},
+        {"PRJ-018","자금세탁방지 (AML)","HQ5","1400","10000"},
+        {"PRJ-019","법규 변경 대응","HQ5","1100","8000"},
+        {"PRJ-020","컴플라이언스 교육","HQ5","900","6000"},
+        {"PRJ-021","연결재무제표 자동화","HQ6","1300","9200"},
+        {"PRJ-022","세무 리스크 분석","HQ6","1100","7800"},
+        {"PRJ-023","내부회계관리제도 고도화","HQ6","1500","10500"},
+        {"PRJ-024","원가관리 시스템 구축","HQ6","1600","11500"},
+        {"PRJ-025","인사평가 시스템 개편","HQ7","1000","7000"},
+        {"PRJ-026","복리후생 플랫폼","HQ7","800","5500"},
+        {"PRJ-027","사옥 리모델링","HQ7","600","4500"},
+        {"PRJ-028","채용 프로세스 혁신","HQ7","700","5000"},
+        {"PRJ-029","AI 챗봇 도입","HQ8","1800","13000"},
+        {"PRJ-030","RPA 업무 자동화","HQ8","1500","11000"},
+        {"PRJ-031","디지털 고객경험 개선","HQ8","1400","10000"},
+        {"PRJ-032","블록체인 결제 PoC","HQ8","1000","8000"},
+        {"PRJ-033","ESG 경영 대응","HQ1","900","6500"},
+        {"PRJ-034","해외법인 관리 체계","HQ2","1100","8000"},
+        {"PRJ-035","차세대 데이터센터","HQ3","2200","16000"},
+    };
+
+    private void seedProjects() {
+        Map<String, Department> deptMap = deptRepo.findAll().stream()
+            .collect(Collectors.toMap(Department::getCode, d -> d));
+        Set<String> existing = projectRepo.findAll().stream()
+            .map(Project::getCode).collect(Collectors.toSet());
+
+        Random pr = new Random(77);
+        for (String[] p : PROJECT_DATA) {
+            if (existing.contains(p[0])) continue;
+            Department dept = deptMap.get(p[2]);
+            if (dept == null) continue;
+
+            int startYear = 2024 + pr.nextInt(2);
+            int startMonth = 1 + pr.nextInt(12);
+            int duration = 6 + pr.nextInt(19);
             LocalDate start = LocalDate.of(startYear, startMonth, 1);
-            LocalDate end = start.plusMonths(durationMonths).minusDays(1);
-            p.setStartDate(start);
-            p.setEndDate(end);
-            projectRepo.save(p);
-        }
-    }
+            LocalDate end = start.plusMonths(duration).minusDays(1);
 
-    /**
-     * Create an over-budget scenario so "예산초과 프로젝트" KPI shows > 0.
-     * We pick PRJ-004 (조직혁신 프로젝트, annual budget 70M) and dump 400h of
-     * 부장-level work in 2026-01 → ~34M actual, while the Q1 phased monthly
-     * budget is only ~4.67M. Result: massive over-budget variance.
-     */
-    private void seedOverBudgetExample() {
-        Project overBudget = projectRepo.findAll().stream()
-            .filter(p -> "PRJ-004".equals(p.getCode()))
-            .findFirst().orElse(null);
-        if (overBudget == null) return;
-
-        // If we already injected this demo, skip.
-        boolean already = timesheetRepo.findAll().stream()
-            .anyMatch(t -> t.getProject().getId().equals(overBudget.getId())
-                        && t.getMemo() != null
-                        && t.getMemo().contains("[DEMO: 예산초과]"));
-        if (already) return;
-
-        // Find a 부장-level employee in any department.
-        Employee senior = employeeRepo.findAll().stream()
-            .filter(e -> "부장".equals(e.getGrade()))
-            .findFirst().orElse(null);
-        if (senior == null) return;
-
-        // Spread 400h across 50 work days (8h each) in Jan 2026
-        int remaining = 400;
-        int day = 2;
-        while (remaining > 0 && day <= 28) {
-            int h = Math.min(remaining, 8);
-            LocalDate date = LocalDate.of(2026, 1, day);
-            timesheetRepo.save(Timesheet.builder()
-                .employee(senior)
-                .project(overBudget)
-                .workDate(date)
-                .hours(BigDecimal.valueOf(h))
-                .memo("[DEMO: 예산초과] 긴급 투입")
-                .status(Timesheet.Status.APPROVED)
-                .submittedAt(date.atTime(18, 0))
-                .approvedAt(date.plusDays(1).atTime(9, 0))
-                .approvedByEmail("manager@noaats.com")
-                .build());
-            remaining -= h;
-            day++;
-        }
-    }
-
-    // ── Base seed methods (run on any profile, including prod) ──────────
-
-    private void seedDepartments() {
-        String[][] depts = {
-            {"HQ1", "경영기획본부"}, {"HQ2", "자산운용본부"}, {"HQ3", "IT본부"},
-            {"HQ4", "리스크관리본부"}, {"HQ5", "컴플라이언스본부"},
-        };
-        for (String[] d : depts) {
-            deptRepo.save(Department.builder().code(d[0]).name(d[1]).build());
-        }
-    }
-
-    private void seedBaseEmployees() {
-        Object[][] emps = {
-            // {empNo, name, grade, deptIdx(1-based), hourlyRate}
-            {"E0001","김민수","사원",1,25000}, {"E0002","이영희","사원",1,25000},
-            {"E0003","박지훈","대리",1,35000}, {"E0004","최서연","대리",1,35000},
-            {"E0005","정우진","대리",1,35000}, {"E0006","강하늘","과장",1,50000},
-            {"E0007","조민재","과장",1,50000}, {"E0008","윤서아","차장",1,65000},
-            {"E0009","임도현","차장",1,65000}, {"E0010","한지민","부장",1,85000},
-
-            {"E0011","오은서","사원",2,25000}, {"E0012","신유진","사원",2,25000},
-            {"E0013","홍기범","대리",2,35000}, {"E0014","송채원","대리",2,35000},
-            {"E0015","문수아","대리",2,35000}, {"E0016","노태현","과장",2,50000},
-            {"E0017","구민호","과장",2,50000}, {"E0018","유나래","차장",2,65000},
-            {"E0019","곽재훈","차장",2,65000}, {"E0020","백승호","부장",2,85000},
-
-            {"E0021","권다은","사원",3,25000}, {"E0022","전소희","사원",3,25000},
-            {"E0023","류준영","대리",3,35000}, {"E0024","서가영","대리",3,35000},
-            {"E0025","남궁현","대리",3,35000}, {"E0026","채윤석","과장",3,50000},
-            {"E0027","지은별","과장",3,50000}, {"E0028","우상현","차장",3,65000},
-            {"E0029","안세빈","차장",3,65000}, {"E0030","배준영","부장",3,85000},
-
-            {"E0031","심예린","사원",4,25000}, {"E0032","전미라","사원",4,25000},
-            {"E0033","석호준","대리",4,35000}, {"E0034","민가현","대리",4,35000},
-            {"E0035","도재민","대리",4,35000}, {"E0036","함은수","과장",4,50000},
-            {"E0037","진세호","과장",4,50000}, {"E0038","오리아","차장",4,65000},
-            {"E0039","감지효","차장",4,65000}, {"E0040","피영준","부장",4,85000},
-
-            {"E0041","진수아","사원",5,25000}, {"E0042","임혁","사원",5,25000},
-            {"E0043","반지현","대리",5,35000}, {"E0044","노정훈","대리",5,35000},
-            {"E0045","유선아","대리",5,35000}, {"E0046","금하늘","과장",5,50000},
-            {"E0047","단우현","과장",5,50000}, {"E0048","갈예진","차장",5,65000},
-            {"E0049","맹승현","차장",5,65000}, {"E0050","우경한","부장",5,85000},
-        };
-        for (Object[] e : emps) {
-            Department d = deptRepo.findById(((Number) e[3]).longValue()).orElse(null);
-            if (d == null) continue;
-            employeeRepo.save(Employee.builder()
-                .empNo((String) e[0]).name((String) e[1]).grade((String) e[2])
-                .department(d).hourlyRate(BigDecimal.valueOf(((Number) e[4]).longValue()))
-                .build());
-        }
-    }
-
-    private void seedBaseProjects() {
-        Object[][] projs = {
-            {"PRJ-001","경영전략 수립",1,1600,100_000_000},
-            {"PRJ-002","중장기 사업계획",1,1400,90_000_000},
-            {"PRJ-003","예산편성 시스템",1,1200,80_000_000},
-            {"PRJ-004","조직혁신 프로젝트",1,1000,70_000_000},
-            {"PRJ-005","자산배분 모델링",2,1800,120_000_000},
-            {"PRJ-006","대체투자 운용",2,1600,110_000_000},
-            {"PRJ-007","글로벌 펀드 운용",2,1500,105_000_000},
-            {"PRJ-008","채권 포트폴리오 최적화",2,1400,95_000_000},
-            {"PRJ-009","코어뱅킹 차세대",3,2400,180_000_000},
-            {"PRJ-010","클라우드 마이그레이션",3,2000,150_000_000},
-            {"PRJ-011","데이터 플랫폼 구축",3,1800,140_000_000},
-            {"PRJ-012","보안관제 고도화",3,1500,110_000_000},
-            {"PRJ-013","VaR 모델 개선",4,1400,95_000_000},
-            {"PRJ-014","신용리스크 관리",4,1300,90_000_000},
-            {"PRJ-015","시장리스크 한도관리",4,1200,85_000_000},
-            {"PRJ-016","스트레스 테스트",4,1100,80_000_000},
-            {"PRJ-017","내부통제 점검",5,1200,85_000_000},
-            {"PRJ-018","자금세탁방지 (AML)",5,1400,100_000_000},
-            {"PRJ-019","법규 변경 대응",5,1100,80_000_000},
-            {"PRJ-020","컴플라이언스 교육",5,900,60_000_000},
-        };
-        for (Object[] p : projs) {
-            Department d = deptRepo.findById(((Number) p[2]).longValue()).orElse(null);
-            if (d == null) continue;
             projectRepo.save(Project.builder()
-                .code((String) p[0]).name((String) p[1]).ownerDepartment(d)
-                .budgetHours(BigDecimal.valueOf(((Number) p[3]).longValue()))
-                .budgetCost(BigDecimal.valueOf(((Number) p[4]).longValue()))
-                .startDate(LocalDate.of(2025, 1, 1))
-                .endDate(LocalDate.of(2026, 12, 31))
+                .code(p[0])
+                .name(p[1])
+                .ownerDepartment(dept)
+                .budgetHours(new BigDecimal(p[3]))
+                .budgetCost(new BigDecimal(p[4]).multiply(BigDecimal.valueOf(10000)))
+                .startDate(start)
+                .endDate(end)
                 .build());
         }
     }
 
+    // ───────────────────── Standard Rates (12 months × 5 grades) ─────────────────────
     private void seedStandardRates() {
-        String[][] months = {
-            {"2026-04","25000","35000","50000","65000","85000"},
-            {"2026-03","25000","35000","50000","65000","85000"},
-            {"2026-02","25000","35000","50000","65000","85000"},
-            {"2026-01","24500","34000","49000","64000","83000"},
-            {"2025-12","24000","33000","48000","63000","82000"},
+        // Gradual rate increases over time
+        int[][] ratesByMonth = {
+            // 사원, 대리, 과장, 차장, 부장
+            {24000, 33000, 48000, 63000, 82000}, // 2025-07
+            {24000, 33000, 48000, 63000, 82000}, // 2025-08
+            {24000, 33000, 48000, 63000, 82000}, // 2025-09
+            {24000, 33000, 48000, 63000, 82000}, // 2025-10
+            {24000, 33000, 48000, 63000, 82000}, // 2025-11
+            {24000, 33000, 48000, 63000, 82000}, // 2025-12
+            {24500, 34000, 49000, 64000, 83000}, // 2026-01
+            {24500, 34000, 49000, 64000, 83000}, // 2026-02
+            {25000, 35000, 50000, 65000, 85000}, // 2026-03
+            {25000, 35000, 50000, 65000, 85000}, // 2026-04
+            {25000, 35000, 50000, 65000, 85000}, // 2026-05
+            {25000, 35000, 50000, 65000, 85000}, // 2026-06
         };
-        String[] grades = {"사원","대리","과장","차장","부장"};
-        for (String[] m : months) {
-            for (int i = 0; i < grades.length; i++) {
+        String[] months = {
+            "2025-07","2025-08","2025-09","2025-10","2025-11","2025-12",
+            "2026-01","2026-02","2026-03","2026-04","2026-05","2026-06",
+        };
+        for (int mi = 0; mi < months.length; mi++) {
+            for (int gi = 0; gi < GRADES.length; gi++) {
                 rateRepo.save(StandardRate.builder()
-                    .yearMonth(m[0]).grade(grades[i])
-                    .hourlyRate(new BigDecimal(m[i + 1]))
+                    .yearMonth(months[mi])
+                    .grade(GRADES[gi])
+                    .hourlyRate(BigDecimal.valueOf(ratesByMonth[mi][gi]))
                     .build());
             }
         }
     }
 
-    /**
-     * Seed sample timesheets across multiple months so the dashboard has data.
-     * Each entry is a single workday with hours ≤ 8 (realistic daily timesheet).
-     * To get monthly totals, we spread hours across multiple days.
-     * Skips if any APPROVED timesheets already exist (idempotent).
-     */
-    private void seedSampleTimesheets() {
-        boolean hasApproved = timesheetRepo.findAll().stream()
-            .anyMatch(t -> t.getStatus() == Timesheet.Status.APPROVED
-                        && t.getMemo() != null && !t.getMemo().contains("[DEMO: 예산초과]"));
-        if (hasApproved) return;
+    // ───────────────────── Timesheets (12 months, ~3000–5000 entries) ─────────────────────
+    private void seedTimesheets() {
+        List<Employee> allEmps = employeeRepo.findAll();
+        List<Project> allProjs = projectRepo.findAll();
+        if (allEmps.isEmpty() || allProjs.isEmpty()) return;
 
-        // April 2026 — spread across work days (each row: empId, projId, totalHours, memo)
-        int[][] april = {
-            {1,1,80},{3,2,75},{6,3,60},{8,4,50},
-            {11,5,90},{13,6,80},{16,7,70},{18,8,65},
-            {21,9,120},{23,10,100},{26,11,95},{28,12,75},
-            {31,13,70},{33,14,65},{36,15,60},{38,16,55},
-            {41,17,60},{43,18,70},{46,19,55},{48,20,45},
+        // Group employees by department
+        Map<Long, List<Employee>> empsByDept = allEmps.stream()
+            .collect(Collectors.groupingBy(e -> e.getDepartment().getId()));
+
+        // Group projects by owner department
+        Map<Long, List<Project>> projsByDept = allProjs.stream()
+            .collect(Collectors.groupingBy(p -> p.getOwnerDepartment().getId()));
+
+        String[] months = {
+            "2025-07","2025-08","2025-09","2025-10","2025-11","2025-12",
+            "2026-01","2026-02","2026-03","2026-04","2026-05","2026-06",
         };
-        for (int[] r : april) {
-            spreadApproved(r[0], r[1], 2026, 4, r[2], "4월 공수");
+
+        Random tsRng = new Random(123);
+
+        for (String ym : months) {
+            int year = Integer.parseInt(ym.substring(0, 4));
+            int month = Integer.parseInt(ym.substring(5, 7));
+
+            // Participation rate increases over time (company growing)
+            double participation = 0.55 + (month <= 6 && year == 2026 ? 0.25 : 0.10)
+                + tsRng.nextDouble() * 0.10;
+
+            for (Map.Entry<Long, List<Employee>> entry : empsByDept.entrySet()) {
+                Long deptId = entry.getKey();
+                List<Employee> deptEmps = entry.getValue();
+                List<Project> deptProjs = projsByDept.getOrDefault(deptId, Collections.emptyList());
+
+                // Some employees also work on cross-dept projects
+                List<Project> crossProjs = allProjs.stream()
+                    .filter(p -> !p.getOwnerDepartment().getId().equals(deptId))
+                    .collect(Collectors.toList());
+
+                for (Employee emp : deptEmps) {
+                    if (tsRng.nextDouble() > participation) continue;
+
+                    // Pick 1-2 projects
+                    Project mainProj = deptProjs.isEmpty()
+                        ? allProjs.get(tsRng.nextInt(allProjs.size()))
+                        : deptProjs.get(tsRng.nextInt(deptProjs.size()));
+
+                    // Check project is active in this month
+                    LocalDate monthStart = LocalDate.of(year, month, 1);
+                    if (mainProj.getEndDate() != null && mainProj.getEndDate().isBefore(monthStart)) {
+                        mainProj = allProjs.get(tsRng.nextInt(allProjs.size()));
+                    }
+
+                    // Monthly hours: 사원 140-170h, 대리 150-175h, 과장 130-160h, 차장 120-150h, 부장 80-120h
+                    int baseHours = switch (emp.getGrade()) {
+                        case "사원" -> 140 + tsRng.nextInt(31);
+                        case "대리" -> 150 + tsRng.nextInt(26);
+                        case "과장" -> 130 + tsRng.nextInt(31);
+                        case "차장" -> 120 + tsRng.nextInt(31);
+                        case "부장" -> 80 + tsRng.nextInt(41);
+                        default -> 120 + tsRng.nextInt(41);
+                    };
+
+                    // Most recent month: some SUBMITTED and DRAFT
+                    Timesheet.Status status;
+                    if ("2026-06".equals(ym)) {
+                        double sr = tsRng.nextDouble();
+                        status = sr < 0.3 ? Timesheet.Status.DRAFT
+                               : sr < 0.6 ? Timesheet.Status.SUBMITTED
+                               : Timesheet.Status.APPROVED;
+                    } else if ("2026-05".equals(ym)) {
+                        status = tsRng.nextDouble() < 0.15
+                            ? Timesheet.Status.SUBMITTED
+                            : Timesheet.Status.APPROVED;
+                    } else {
+                        status = Timesheet.Status.APPROVED;
+                    }
+
+                    // 20% chance of working on a second (cross-dept) project
+                    boolean hasCross = tsRng.nextDouble() < 0.20 && !crossProjs.isEmpty();
+                    int mainHours = hasCross ? (int)(baseHours * 0.7) : baseHours;
+                    int crossHours = hasCross ? baseHours - mainHours : 0;
+
+                    spreadTimesheet(emp, mainProj, year, month, mainHours, status, tsRng);
+                    if (hasCross) {
+                        Project cp = crossProjs.get(tsRng.nextInt(crossProjs.size()));
+                        spreadTimesheet(emp, cp, year, month, crossHours, status, tsRng);
+                    }
+                }
+            }
         }
-
-        // March 2026
-        int[][] march = {{1,1,60},{11,5,70},{21,9,110},{31,13,65},{41,17,55}};
-        for (int[] r : march) spreadApproved(r[0], r[1], 2026, 3, r[2], "3월 공수");
-
-        // Feb 2026
-        int[][] feb = {{3,2,55},{13,6,75},{23,10,95},{33,14,60}};
-        for (int[] r : feb) spreadApproved(r[0], r[1], 2026, 2, r[2], "2월 공수");
-
-        // Jan 2026
-        int[][] jan = {{6,3,50},{16,7,65},{26,11,85}};
-        for (int[] r : jan) spreadApproved(r[0], r[1], 2026, 1, r[2], "1월 공수");
-
-        // Dec 2025
-        int[][] dec = {
-            {1,1,40},{3,2,45},{8,4,40},{11,5,85},{13,6,70},{18,8,60},
-            {21,9,110},{23,10,95},{28,12,70},{31,13,60},{36,15,50},{41,17,55},{46,19,50},
-        };
-        for (int[] r : dec) spreadApproved(r[0], r[1], 2025, 12, r[2], "12월 공수");
-
-        // A few SUBMITTED and DRAFT entries
-        saveSubmitted(2, 1, LocalDate.of(2026, 4, 19), 6, "리서치 보조");
-        saveSubmitted(4, 2, LocalDate.of(2026, 4, 19), 8, "문서 정리");
-        saveSubmitted(12, 5, LocalDate.of(2026, 4, 19), 7, "시장 분석");
-        saveDraft(22, 9, LocalDate.of(2026, 4, 20), 8, "설계 검토");
     }
 
-    /**
-     * Spread totalHours across multiple work days in the given month.
-     * Each day gets up to 8 hours.
-     */
-    private void spreadApproved(long empId, long projId, int year, int month, int totalHours, String memo) {
-        Employee emp = employeeRepo.findById(empId).orElse(null);
-        Project proj = projectRepo.findById(projId).orElse(null);
-        if (emp == null || proj == null) return;
-
+    private void spreadTimesheet(Employee emp, Project proj, int year, int month,
+                                  int totalHours, Timesheet.Status status, Random r) {
         int remaining = totalHours;
-        int day = 2; // start from 2nd of the month
-        while (remaining > 0) {
-            int h = Math.min(remaining, 8);
-            LocalDate date = LocalDate.of(year, month, day);
-            timesheetRepo.save(Timesheet.builder()
+        // Collect work days in the month
+        List<LocalDate> workDays = new ArrayList<>();
+        LocalDate d = LocalDate.of(year, month, 1);
+        while (d.getMonthValue() == month) {
+            if (d.getDayOfWeek() != DayOfWeek.SATURDAY && d.getDayOfWeek() != DayOfWeek.SUNDAY) {
+                workDays.add(d);
+            }
+            d = d.plusDays(1);
+        }
+        if (workDays.isEmpty()) return;
+
+        int dayIdx = 0;
+        while (remaining > 0 && dayIdx < workDays.size()) {
+            int h = Math.min(remaining, 6 + r.nextInt(3)); // 6-8h per day
+            LocalDate date = workDays.get(dayIdx);
+
+            String memo = pickMemo(r);
+
+            Timesheet.TimesheetBuilder tb = Timesheet.builder()
                 .employee(emp).project(proj).workDate(date)
                 .hours(BigDecimal.valueOf(h)).memo(memo)
-                .status(Timesheet.Status.APPROVED)
-                .submittedAt(date.atTime(18, 0))
-                .approvedAt(date.plusDays(1).atTime(10, 0))
-                .approvedByEmail("manager@noaats.com")
-                .build());
+                .status(status);
+
+            if (status == Timesheet.Status.SUBMITTED || status == Timesheet.Status.APPROVED) {
+                tb.submittedAt(date.atTime(17 + r.nextInt(2), r.nextInt(60)));
+            }
+            if (status == Timesheet.Status.APPROVED) {
+                tb.approvedAt(date.plusDays(1 + r.nextInt(3)).atTime(9 + r.nextInt(3), r.nextInt(60)))
+                  .approvedByEmail("manager@noaats.com");
+            }
+
+            timesheetRepo.save(tb.build());
             remaining -= h;
-            day++;
-            if (day > 28) break; // safety: don't exceed month
+            dayIdx++;
         }
     }
 
-    private void saveSubmitted(long empId, long projId, LocalDate date, int hours, String memo) {
-        Employee emp = employeeRepo.findById(empId).orElse(null);
-        Project proj = projectRepo.findById(projId).orElse(null);
-        if (emp == null || proj == null) return;
-        timesheetRepo.save(Timesheet.builder()
-            .employee(emp).project(proj).workDate(date)
-            .hours(BigDecimal.valueOf(hours)).memo(memo)
-            .status(Timesheet.Status.SUBMITTED)
-            .submittedAt(date.atTime(18, 0))
-            .build());
+    private static final String[] MEMOS = {
+        "설계 검토","코드 리뷰","회의 참석","문서 작성","테스트 수행",
+        "요구사항 분석","데이터 분석","모델 개발","시스템 점검","고객 미팅",
+        "기술 검토","아키텍처 설계","프로토타입 개발","성능 최적화","보안 점검",
+        "배포 작업","운영 지원","교육 진행","보고서 작성","기획서 작성",
+        "리서치","PoC 개발","마이그레이션 작업","모니터링","장애 대응",
+        "인터페이스 개발","API 연동","DB 설계","UI/UX 개선","법규 검토",
+    };
+
+    private String pickMemo(Random r) {
+        return MEMOS[r.nextInt(MEMOS.length)];
     }
 
-    private void saveDraft(long empId, long projId, LocalDate date, int hours, String memo) {
-        Employee emp = employeeRepo.findById(empId).orElse(null);
-        Project proj = projectRepo.findById(projId).orElse(null);
-        if (emp == null || proj == null) return;
-        timesheetRepo.save(Timesheet.builder()
-            .employee(emp).project(proj).workDate(date)
-            .hours(BigDecimal.valueOf(hours)).memo(memo)
-            .status(Timesheet.Status.DRAFT)
-            .build());
+    // ───────────────────── Cost Items (indirect costs per month) ─────────────────────
+    private void seedCostItems() {
+        List<Department> depts = deptRepo.findAll();
+        String[] months = {
+            "2025-07","2025-08","2025-09","2025-10","2025-11","2025-12",
+            "2026-01","2026-02","2026-03","2026-04","2026-05","2026-06",
+        };
+        String[][] categories = {
+            {"사무실 임대료","INDIRECT"},
+            {"공과금","INDIRECT"},
+            {"통신비","INDIRECT"},
+            {"소모품비","INDIRECT"},
+            {"교육훈련비","INDIRECT"},
+            {"복리후생비","INDIRECT"},
+            {"감가상각비","INDIRECT"},
+            {"보험료","INDIRECT"},
+        };
+        long[][] amounts = {
+            // per dept, per category (in 만 won). Vary by dept size
+            {1200, 180, 90, 60, 120, 200, 300, 150},  // HQ1
+            {1400, 200, 100, 70, 140, 240, 350, 170},  // HQ2
+            {1600, 250, 150, 100, 180, 280, 400, 200},  // HQ3 (IT - larger)
+            {1000, 150, 80, 50, 100, 180, 250, 130},   // HQ4
+            {900, 130, 70, 45, 90, 160, 220, 110},     // HQ5
+            {1100, 170, 85, 55, 110, 190, 280, 140},   // HQ6
+            {800, 120, 65, 40, 80, 150, 200, 100},     // HQ7
+            {1300, 200, 120, 80, 150, 220, 320, 160},  // HQ8
+        };
+        Random ciRng = new Random(55);
+        for (String ym : months) {
+            for (int di = 0; di < depts.size() && di < amounts.length; di++) {
+                Department dept = depts.get(di);
+                for (int ci = 0; ci < categories.length; ci++) {
+                    // Add ±10% random variation per month
+                    double variation = 0.90 + ciRng.nextDouble() * 0.20;
+                    long amt = (long)(amounts[di][ci] * 10000 * variation);
+                    costItemRepo.save(CostItem.builder()
+                        .yearMonth(ym)
+                        .type(CostItem.CostType.INDIRECT)
+                        .department(dept)
+                        .category(categories[ci][0])
+                        .amount(BigDecimal.valueOf(amt))
+                        .build());
+                }
+            }
+        }
+    }
+
+    // ───────────────────── Allocations ─────────────────────
+    private void seedAllocations() {
+        List<Department> depts = deptRepo.findAll();
+        List<Project> projs = projectRepo.findAll();
+        if (depts.isEmpty() || projs.isEmpty()) return;
+
+        String[] months = {
+            "2025-07","2025-08","2025-09","2025-10","2025-11","2025-12",
+            "2026-01","2026-02","2026-03","2026-04","2026-05","2026-06",
+        };
+        Random alRng = new Random(88);
+        CostAllocation.AllocationBasis[] bases = CostAllocation.AllocationBasis.values();
+
+        for (String ym : months) {
+            // Each dept allocates to 2-4 projects
+            for (Department dept : depts) {
+                List<Project> deptProjs = projs.stream()
+                    .filter(p -> p.getOwnerDepartment().getId().equals(dept.getId()))
+                    .collect(Collectors.toList());
+                if (deptProjs.isEmpty()) continue;
+
+                int allocCount = 2 + alRng.nextInt(3);
+                for (int i = 0; i < allocCount && i < deptProjs.size(); i++) {
+                    long amount = (5_000_000L + alRng.nextInt(15_000_000));
+                    allocationRepo.save(CostAllocation.builder()
+                        .yearMonth(ym)
+                        .sourceDepartment(dept)
+                        .targetProject(deptProjs.get(i))
+                        .basis(bases[alRng.nextInt(bases.length)])
+                        .amount(BigDecimal.valueOf(amount))
+                        .kind(CostAllocation.AllocationKind.STANDARD_ALLOC)
+                        .createdAt(LocalDate.parse(ym + "-15").atTime(10, 0))
+                        .build());
+                }
+            }
+
+            // 2-3 inter-dept transfers per month
+            int transferCount = 2 + alRng.nextInt(2);
+            for (int t = 0; t < transferCount; t++) {
+                Department src = depts.get(alRng.nextInt(depts.size()));
+                Department tgt;
+                do { tgt = depts.get(alRng.nextInt(depts.size())); } while (tgt.getId().equals(src.getId()));
+
+                int hours = 20 + alRng.nextInt(60);
+                int rate = 50000 + alRng.nextInt(30000);
+                long amount = (long) hours * rate;
+
+                String[] transferMemos = {
+                    "IT 개발지원","경영기획 자문","리스크 분석 지원","컴플라이언스 검토",
+                    "데이터 분석 지원","시스템 운영 지원","보안 점검 지원","교육 지원",
+                };
+
+                allocationRepo.save(CostAllocation.builder()
+                    .yearMonth(ym)
+                    .sourceDepartment(src)
+                    .targetDepartment(tgt)
+                    .basis(CostAllocation.AllocationBasis.HOURS)
+                    .amount(BigDecimal.valueOf(amount))
+                    .kind(CostAllocation.AllocationKind.TRANSFER)
+                    .memo(transferMemos[alRng.nextInt(transferMemos.length)]
+                        + " (" + hours + "h × " + String.format("%,d", rate) + "원)")
+                    .createdAt(LocalDate.parse(ym + "-20").atTime(14, 0))
+                    .build());
+            }
+        }
+    }
+
+    // ───────────────────── Audit Logs ─────────────────────
+    private void seedAuditLogs() {
+        String[] actors = {"admin@noaats.com", "manager@noaats.com", "user@noaats.com"};
+        String[] actions = {
+            "CREATE_TIMESHEET","SUBMIT_TIMESHEET","APPROVE_TIMESHEET","REJECT_TIMESHEET",
+            "DELETE_TIMESHEET","ALLOCATE","TRANSFER",
+        };
+        String[] entities = {"TIMESHEET","TIMESHEET","TIMESHEET","TIMESHEET","TIMESHEET","ALLOCATION","ALLOCATION"};
+
+        Random auRng = new Random(99);
+        // Generate ~200 audit entries over 12 months
+        for (int i = 0; i < 200; i++) {
+            int monthOffset = auRng.nextInt(12);
+            LocalDate base = LocalDate.of(2025, 7, 1).plusMonths(monthOffset);
+            int day = 1 + auRng.nextInt(28);
+            LocalDateTime ts = base.withDayOfMonth(Math.min(day, base.lengthOfMonth()))
+                .atTime(8 + auRng.nextInt(10), auRng.nextInt(60));
+
+            int actionIdx = auRng.nextInt(actions.length);
+            String detail = switch (actions[actionIdx]) {
+                case "CREATE_TIMESHEET" -> "공수 등록 " + (4 + auRng.nextInt(5)) + "h";
+                case "SUBMIT_TIMESHEET" -> "공수 제출";
+                case "APPROVE_TIMESHEET" -> "공수 승인 완료";
+                case "REJECT_TIMESHEET" -> "반려 사유: 프로젝트 코드 확인 필요";
+                case "DELETE_TIMESHEET" -> "DRAFT 공수 삭제";
+                case "ALLOCATE" -> "간접비 배분 실행 (" + base.getYear() + "-"
+                    + String.format("%02d", base.getMonthValue()) + ")";
+                case "TRANSFER" -> "내부대체 기록";
+                default -> "";
+            };
+
+            auditLogRepo.save(AuditLog.builder()
+                .actor(actors[auRng.nextInt(actors.length)])
+                .action(actions[actionIdx])
+                .entity(entities[actionIdx])
+                .entityId((long)(1 + auRng.nextInt(500)))
+                .detail(detail)
+                .createdAt(ts)
+                .build());
+        }
+    }
+
+    // ───────────────────── Migration helper ─────────────────────
+    private void migrateAllocationKind() {
+        allocationRepo.findAll().stream()
+            .filter(a -> a.getKind() == null)
+            .forEach(a -> {
+                a.setKind(CostAllocation.AllocationKind.STANDARD_ALLOC);
+                allocationRepo.save(a);
+            });
     }
 }

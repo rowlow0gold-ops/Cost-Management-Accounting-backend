@@ -151,7 +151,7 @@ public class TimesheetService {
      * Import timesheets from an Excel file (.xlsx).
      * Expected columns: 사번(empNo) | 프로젝트코드(projectCode) | 근무일(workDate) | 시간(hours) | 메모(memo)
      */
-    private static final int MAX_IMPORT_ROWS = 100;
+    private static final int MAX_IMPORT_ROWS = 1000;
     private static final String[] EXPECTED_HEADERS = {"사번", "프로젝트코드", "근무일", "시간", "메모", "Action"};
 
     public int validateExcel(MultipartFile file) throws IOException {

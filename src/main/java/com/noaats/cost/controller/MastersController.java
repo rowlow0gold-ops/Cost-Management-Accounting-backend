@@ -3,6 +3,7 @@ package com.noaats.cost.controller;
 import com.noaats.cost.domain.*;
 import com.noaats.cost.repository.*;
 import com.noaats.cost.service.CostItemService;
+import com.noaats.cost.util.PageHelper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -26,7 +27,17 @@ public class MastersController {
 
     // ----- Departments
     @GetMapping("/departments")
-    public List<Department> deptList() { return deptRepo.findAll(); }
+    public Object deptList(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
+            @RequestParam(required = false) String keyword) {
+        if (page != null) {
+            return deptRepo.search(keyword, PageHelper.of(page, size, sortBy, sortDir));
+        }
+        return deptRepo.findAll();
+    }
 
     @PostMapping("/departments")
     @PreAuthorize("hasRole('ADMIN')")
@@ -44,7 +55,17 @@ public class MastersController {
 
     // ----- Employees
     @GetMapping("/employees")
-    public List<Employee> empList() { return empRepo.findAll(); }
+    public Object empList(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
+            @RequestParam(required = false) String keyword) {
+        if (page != null) {
+            return empRepo.search(keyword, PageHelper.of(page, size, sortBy, sortDir));
+        }
+        return empRepo.findAll();
+    }
 
     @PostMapping("/employees")
     @PreAuthorize("hasRole('ADMIN')")
@@ -62,7 +83,17 @@ public class MastersController {
 
     // ----- Projects
     @GetMapping("/projects")
-    public List<Project> projList() { return projRepo.findAll(); }
+    public Object projList(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
+            @RequestParam(required = false) String keyword) {
+        if (page != null) {
+            return projRepo.search(keyword, PageHelper.of(page, size, sortBy, sortDir));
+        }
+        return projRepo.findAll();
+    }
 
     @PostMapping("/projects")
     @PreAuthorize("hasRole('ADMIN')")
@@ -90,7 +121,16 @@ public class MastersController {
 
     // ----- Cost items (indirect costs etc.)
     @GetMapping("/cost-items")
-    public List<CostItem> costItems(@RequestParam String yearMonth) {
+    public Object costItems(
+            @RequestParam String yearMonth,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
+            @RequestParam(required = false) String keyword) {
+        if (page != null) {
+            return costItemRepo.search(yearMonth, keyword, PageHelper.of(page, size, sortBy, sortDir));
+        }
         return costItemRepo.findByYearMonth(yearMonth);
     }
 

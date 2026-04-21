@@ -4,15 +4,15 @@ import com.noaats.cost.domain.Timesheet;
 import com.noaats.cost.dto.CostDtos.TimesheetRequest;
 import com.noaats.cost.repository.TimesheetRepository;
 import com.noaats.cost.service.TimesheetService;
+import com.noaats.cost.util.PageHelper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.security.Principal;
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -24,9 +24,19 @@ public class TimesheetController {
     private final TimesheetRepository repo;
 
     @GetMapping
-    public List<Timesheet> list(@RequestParam(required = false) String status) {
-        if (status == null) return repo.findAllByOrderByWorkDateDescIdDesc();
-        return repo.findByStatusOrderByWorkDateDescIdDesc(Timesheet.Status.valueOf(status.toUpperCase()));
+    public Page<Timesheet> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir,
+            @RequestParam(required = false) String keyword) {
+        Timesheet.Status st = null;
+        if (status != null && !status.isBlank()) {
+            st = Timesheet.Status.valueOf(status.toUpperCase());
+        }
+        String sort = (sortBy != null && !sortBy.isBlank()) ? sortBy : "workDate";
+        return repo.search(st, keyword, PageHelper.of(page, size, sort, sortDir));
     }
 
     @PostMapping

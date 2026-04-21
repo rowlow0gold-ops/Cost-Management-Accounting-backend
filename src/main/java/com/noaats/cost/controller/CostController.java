@@ -3,9 +3,12 @@ package com.noaats.cost.controller;
 import com.noaats.cost.domain.CostAllocation;
 import com.noaats.cost.dto.CostDtos.*;
 import com.noaats.cost.dto.CostDtos.TimeSeriesPoint;
+import com.noaats.cost.repository.CostAllocationRepository;
 import com.noaats.cost.service.CostService;
 import com.noaats.cost.service.TransferImportService;
+import com.noaats.cost.util.PageHelper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -19,6 +22,7 @@ public class CostController {
 
     private final CostService costService;
     private final TransferImportService transferImport;
+    private final CostAllocationRepository allocationRepo;
 
     @GetMapping("/aggregate")
     public List<CostAggregateRow> aggregate(
@@ -35,8 +39,30 @@ public class CostController {
         return costService.allocate(req);
     }
 
+    @GetMapping("/allocations")
+    public Page<CostAllocation> allocations(
+            @RequestParam String yearMonth,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
+            @RequestParam(required = false) String keyword) {
+        return allocationRepo.searchAllocations(yearMonth, keyword,
+            PageHelper.of(page, size, sortBy, sortDir));
+    }
+
     @GetMapping("/transfers")
-    public List<CostAllocation> transfers(@RequestParam String yearMonth) {
+    public Object transfers(
+            @RequestParam String yearMonth,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDir,
+            @RequestParam(required = false) String keyword) {
+        if (page != null) {
+            return allocationRepo.searchTransfers(yearMonth, keyword,
+                PageHelper.of(page, size, sortBy, sortDir));
+        }
         return costService.transfers(yearMonth);
     }
 

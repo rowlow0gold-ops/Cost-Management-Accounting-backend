@@ -39,7 +39,7 @@ public class CostAllocation {
     private BigDecimal amount;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(length = 20)
     private AllocationKind kind;
 
     @Column(length = 500)
