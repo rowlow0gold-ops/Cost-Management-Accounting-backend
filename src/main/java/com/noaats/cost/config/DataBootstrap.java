@@ -42,11 +42,25 @@ public class DataBootstrap implements CommandLineRunner {
     @Override
     public void run(String... args) {
         migrateAllocationKind();
-        if (deptRepo.count() == 0) seedDepartments();
+        // If departments don't match our 20, wipe everything and re-seed (handles data-h2.sql conflict)
+        if (deptRepo.count() < 20) {
+            log.info("Clearing stale seed data...");
+            jdbc.execute("SET REFERENTIAL_INTEGRITY FALSE");
+            jdbc.execute("DELETE FROM audit_log");
+            jdbc.execute("DELETE FROM cost_allocation");
+            jdbc.execute("DELETE FROM cost_item");
+            jdbc.execute("DELETE FROM timesheet");
+            jdbc.execute("DELETE FROM standard_rate");
+            jdbc.execute("DELETE FROM employee");
+            jdbc.execute("DELETE FROM project");
+            jdbc.execute("DELETE FROM department");
+            jdbc.execute("SET REFERENTIAL_INTEGRITY TRUE");
+            seedDepartments();
+        }
         if (userRepo.count() == 0) seedUsers();
         if (employeeRepo.count() < 1900) { log.info("Seeding 2000 employees..."); seedEmployeesFast(); }
         if (projectRepo.count() < 80) { log.info("Seeding 100 projects..."); seedProjectsFast(); }
-        if (rateRepo.count() == 0) seedStandardRatesFast();
+        if (rateRepo.count() < 70) seedStandardRatesFast();
         if (timesheetRepo.count() < 5000) { log.info("Seeding timesheets (JDBC batch)..."); seedTimesheetsFast(); }
         if (costItemRepo.count() < 100) { log.info("Seeding cost items..."); seedCostItemsFast(); }
         if (allocationRepo.count() < 50) { log.info("Seeding allocations..."); seedAllocationsFast(); }
@@ -258,6 +272,18 @@ public class DataBootstrap implements CommandLineRunner {
                 Collectors.mapping(p -> ((Number)p.get("id")).longValue(), Collectors.toList())));
         List<Long> allProjIds = projs.stream().map(p -> ((Number)p.get("id")).longValue()).collect(Collectors.toList());
 
+        // Company-wide flagship projects that pull people from ALL departments
+        // These are the big-budget cross-functional projects (indices into PROJECT_DATA)
+        // PRJ-011 코어뱅킹 차세대, PRJ-012 클라우드 마이그레이션, PRJ-096 전사 ERP,
+        // PRJ-064 콜센터 AI, PRJ-069 차세대 금융모델, PRJ-100 고객360 통합플랫폼
+        List<Long> flagshipIds = new ArrayList<>();
+        for (Map<String,Object> p : projs) {
+            String code = jdbc.queryForObject("SELECT code FROM project WHERE id=?", String.class, ((Number)p.get("id")).longValue());
+            if (code != null && (code.equals("PRJ-011") || code.equals("PRJ-012") || code.equals("PRJ-096")
+                || code.equals("PRJ-064") || code.equals("PRJ-069") || code.equals("PRJ-100")))
+                flagshipIds.add(((Number)p.get("id")).longValue());
+        }
+
         Random tsRng = new Random(123);
         List<Object[]> batch = new ArrayList<>(2000);
         int total = 0;
@@ -279,9 +305,15 @@ public class DataBootstrap implements CommandLineRunner {
             else participation = 0.40 + tsRng.nextDouble() * 0.05;
             if ("2026-04".equals(ym)) participation *= 0.6;
 
-            LocalDate mid = LocalDate.of(year, month, 15);
-            while (mid.getDayOfWeek() == DayOfWeek.SATURDAY || mid.getDayOfWeek() == DayOfWeek.SUNDAY) mid = mid.plusDays(1);
-            if ("2026-04".equals(ym) && mid.isAfter(LocalDate.of(2026,4,21))) mid = LocalDate.of(2026,4,21);
+            // Collect working days (Mon-Fri) for this month
+            LocalDate firstDay = LocalDate.of(year, month, 1);
+            LocalDate lastDay = firstDay.withDayOfMonth(firstDay.lengthOfMonth());
+            if ("2026-04".equals(ym)) lastDay = LocalDate.of(2026, 4, 21);
+            List<LocalDate> workDays = new ArrayList<>();
+            for (LocalDate d = firstDay; !d.isAfter(lastDay); d = d.plusDays(1)) {
+                if (d.getDayOfWeek() != DayOfWeek.SATURDAY && d.getDayOfWeek() != DayOfWeek.SUNDAY)
+                    workDays.add(d);
+            }
 
             for (Map.Entry<Long,List<Map<String,Object>>> entry : empsByDept.entrySet()) {
                 Long deptId = entry.getKey();
@@ -290,20 +322,29 @@ public class DataBootstrap implements CommandLineRunner {
                 for (Map<String,Object> emp : entry.getValue()) {
                     if (tsRng.nextDouble() > participation) continue;
                     Long empId = ((Number)emp.get("id")).longValue();
-                    String grade = (String)emp.get("grade");
-                    Long projId = deptProjIds.get(tsRng.nextInt(deptProjIds.size()));
 
-                    int hours = switch (grade) {
-                        case "사원" -> 140 + tsRng.nextInt(31); case "대리" -> 150 + tsRng.nextInt(26);
-                        case "과장" -> 130 + tsRng.nextInt(31); case "차장" -> 120 + tsRng.nextInt(31);
-                        case "부장" -> 80 + tsRng.nextInt(41); default -> 120 + tsRng.nextInt(41);
-                    };
-                    if ("2026-04".equals(ym)) hours = (int)(hours * 0.65);
+                    // 40% → flagship company-wide project (creates dominant slices in pie chart)
+                    // 40% → own department's first project (department flagship)
+                    // 20% → random project from own department
+                    Long projId;
+                    double roll = tsRng.nextDouble();
+                    if (roll < 0.40 && !flagshipIds.isEmpty()) {
+                        projId = flagshipIds.get(tsRng.nextInt(flagshipIds.size()));
+                    } else if (roll < 0.80) {
+                        projId = deptProjIds.get(0); // department's main project
+                    } else {
+                        projId = deptProjIds.get(tsRng.nextInt(deptProjIds.size()));
+                    }
+
+                    // Pick 3-5 random working days per employee per month
+                    int numDays = 3 + tsRng.nextInt(3);
+                    if ("2026-04".equals(ym)) numDays = 2 + tsRng.nextInt(2);
+                    numDays = Math.min(numDays, workDays.size());
+                    List<LocalDate> picked = new ArrayList<>(workDays);
+                    Collections.shuffle(picked, tsRng);
+                    picked = picked.subList(0, numDays);
 
                     String status;
-                    java.sql.Timestamp submittedAt = null, approvedAt = null;
-                    String approvedBy = null;
-
                     if ("2026-04".equals(ym)) {
                         double sr = tsRng.nextDouble();
                         status = sr < 0.50 ? "DRAFT" : sr < 0.80 ? "SUBMITTED" : "APPROVED";
@@ -312,18 +353,24 @@ public class DataBootstrap implements CommandLineRunner {
                         status = sr < 0.10 ? "DRAFT" : sr < 0.25 ? "SUBMITTED" : "APPROVED";
                     } else { status = "APPROVED"; }
 
-                    if (!"DRAFT".equals(status))
-                        submittedAt = java.sql.Timestamp.valueOf(mid.atTime(17+tsRng.nextInt(2), tsRng.nextInt(60)));
-                    if ("APPROVED".equals(status)) {
-                        approvedAt = java.sql.Timestamp.valueOf(mid.plusDays(1+tsRng.nextInt(3)).atTime(9+tsRng.nextInt(3), tsRng.nextInt(60)));
-                        approvedBy = "manager@noaats.com";
-                    }
+                    for (LocalDate day : picked) {
+                        int hours = 4 + tsRng.nextInt(5); // 4~8 hours per day
+                        java.sql.Timestamp submittedAt = null, approvedAt = null;
+                        String approvedBy = null;
 
-                    batch.add(new Object[]{empId, projId, java.sql.Date.valueOf(mid),
-                        BigDecimal.valueOf(hours), memos[tsRng.nextInt(memos.length)],
-                        status, submittedAt, approvedAt, approvedBy});
-                    total++;
-                    if (batch.size() >= 1000) { flushTimesheets(batch); batch.clear(); }
+                        if (!"DRAFT".equals(status))
+                            submittedAt = java.sql.Timestamp.valueOf(day.atTime(17 + tsRng.nextInt(2), tsRng.nextInt(60)));
+                        if ("APPROVED".equals(status)) {
+                            approvedAt = java.sql.Timestamp.valueOf(day.plusDays(1 + tsRng.nextInt(3)).atTime(9 + tsRng.nextInt(3), tsRng.nextInt(60)));
+                            approvedBy = "manager@noaats.com";
+                        }
+
+                        batch.add(new Object[]{empId, projId, java.sql.Date.valueOf(day),
+                            BigDecimal.valueOf(hours), memos[tsRng.nextInt(memos.length)],
+                            status, submittedAt, approvedAt, approvedBy});
+                        total++;
+                        if (batch.size() >= 1000) { flushTimesheets(batch); batch.clear(); }
+                    }
                 }
             }
             log.info("Timesheets through {}, total: {}", ym, total);
