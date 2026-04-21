@@ -52,7 +52,7 @@ spring:
     activate:
       on-profile: prod
   datasource:
-    url: ${DATABASE_URL}
+    url: ${DATABASE_URL}?reWriteBatchedInserts=true
     username: ${DATABASE_USERNAME}
     password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
