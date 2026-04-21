@@ -52,10 +52,13 @@ spring:
     activate:
       on-profile: prod
   datasource:
-    url: ${DATABASE_URL}?reWriteBatchedInserts=true
+    url: ${DATABASE_URL}
     username: ${DATABASE_USERNAME}
     password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      data-source-properties:
+        reWriteBatchedInserts: true
   jpa:
     hibernate:
       ddl-auto: create
