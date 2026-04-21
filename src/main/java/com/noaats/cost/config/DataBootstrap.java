@@ -246,12 +246,8 @@ public class DataBootstrap implements CommandLineRunner {
         List<Long> allProjIds = projs.stream().map(p -> ((Number)p.get("id")).longValue()).collect(Collectors.toList());
 
         // Company-wide flagship projects: PRJ-005 코어뱅킹 차세대, PRJ-006 클라우드 마이그레이션, PRJ-011 원가관리 시스템
-        List<Long> flagshipIds = new ArrayList<>();
-        for (Map<String,Object> p : projs) {
-            String code = jdbc.queryForObject("SELECT code FROM project WHERE id=?", String.class, ((Number)p.get("id")).longValue());
-            if (code != null && (code.equals("PRJ-005") || code.equals("PRJ-006") || code.equals("PRJ-011")))
-                flagshipIds.add(((Number)p.get("id")).longValue());
-        }
+        List<Long> flagshipIds = jdbc.queryForList(
+            "SELECT id FROM project WHERE code IN ('PRJ-005','PRJ-006','PRJ-011')", Long.class);
 
         Random tsRng = new Random(123);
         List<Object[]> batch = new ArrayList<>(2000);
@@ -433,7 +429,7 @@ public class DataBootstrap implements CommandLineRunner {
         String[] entities = {"TIMESHEET","TIMESHEET","TIMESHEET","TIMESHEET","TIMESHEET","ALLOCATION","ALLOCATION"};
         Random auRng = new Random(99);
         List<Object[]> rows = new ArrayList<>();
-        for (int i = 0; i < 500; i++) {
+        for (int i = 0; i < 200; i++) {
             LocalDate base = LocalDate.of(2025,1,1).plusMonths(auRng.nextInt(16));
             int day = 1+auRng.nextInt(28);
             LocalDateTime ts = base.withDayOfMonth(Math.min(day, base.lengthOfMonth())).atTime(8+auRng.nextInt(10), auRng.nextInt(60));
