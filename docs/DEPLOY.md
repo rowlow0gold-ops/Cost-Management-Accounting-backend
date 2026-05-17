@@ -8,7 +8,7 @@ All three services have permanent free tiers (as of 2026-04).
 1. Create an account at https://neon.tech
 2. New project → name `cost-mgmt-db` → region nearest you.
 3. Copy the connection string. Example:
-   `postgresql://noaats:pwd@ep-xxx.ap-northeast-2.aws.neon.tech/neondb`
+   `postgresql://demo:pwd@ep-xxx.ap-northeast-2.aws.neon.tech/neondb`
 4. Extract host/user/password — you'll need them as separate env vars.
 
 ## 2) Backend (Render)
@@ -35,7 +35,7 @@ All three services have permanent free tiers (as of 2026-04).
 
 ## 4) Verify
 
-- Visit the Vercel URL → login with `admin@noaats.com / password123`.
+- Visit the Vercel URL → login with `admin@demo.com / password123`.
 - Dashboard loads data from backend.
 - Note: Render free tier cold-starts after 15 min idle; first request may take ~30s.
 

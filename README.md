@@ -21,9 +21,9 @@ All passwords: `password123`
 
 | Email | Role |
 |---|---|
-| admin@noaats.com   | ADMIN   |
-| manager@noaats.com | MANAGER |
-| user@noaats.com    | USER    |
+| admin@demo.com   | ADMIN   |
+| manager@demo.com | MANAGER |
+| user@demo.com    | USER    |
 
 ## Endpoints
 

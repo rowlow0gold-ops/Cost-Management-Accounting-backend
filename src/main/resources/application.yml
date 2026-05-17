@@ -16,7 +16,7 @@ app:
 
 logging:
   level:
-    com.noaats.cost: DEBUG
+    com.demo.cost: DEBUG
 
 ---
 spring:
