@@ -9,35 +9,37 @@ on:
       - "docs/**"
   workflow_dispatch:
 
+env:
+  IMAGE: stack-cost-backend:latest
+  DEPLOYMENT: cost-backend
+  NAMESPACE: apps
+  KUBECONFIG: /tmp/k3s.yaml
+
 jobs:
   deploy:
-    name: Build & Deploy (home server)
+    name: Build & Deploy to K3s
     runs-on: [self-hosted, home]
     steps:
-      - name: Sync source on home server
+      - name: Sync source
         run: |
           cd /home/jj/apps/Cost-Management-Accounting-backend
           git fetch origin main
           git reset --hard origin/main
 
-      - name: Rebuild & restart backend (Spring Boot — slow)
+      - name: Build image
         run: |
-          cd /home/jj/apps/stack
-          docker compose --env-file .env build cost-backend
-          docker compose --env-file .env up -d --no-deps cost-backend
+          cd /home/jj/apps/Cost-Management-Accounting-backend
+          docker build -t ${{ env.IMAGE }} .
 
-      - name: Wait for startup
+      - name: Import into K3s containerd
+        run: docker save ${{ env.IMAGE }} | /usr/local/bin/k3s ctr -n k8s.io images import -
+
+      - name: Rollout restart deployment
         run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://cost-backend:8080/api/auth/login -X POST -H "Content-Type: application/json" -d '{}' > /dev/null 2>&1; then
-              echo "Backend healthy after ${i}x2s"
-              exit 0
-            fi
-            if curl -fsS -o /dev/null http://cost-backend:8080/ 2>&1 | grep -qE "200|403"; then
-              echo "Backend responding after ${i}x2s"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Backend failed health check"
-          exit 1
+          /usr/local/bin/k3s kubectl --insecure-skip-tls-verify rollout restart deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }}
+          /usr/local/bin/k3s kubectl --insecure-skip-tls-verify rollout status deployment/${{ env.DEPLOYMENT }} -n ${{ env.NAMESPACE }} --timeout=180s
+
+      - name: Health check
+        run: |
+          sleep 5
+          curl -fsS -o /dev/null https://cost.minhojan-world.site/ || curl -fsS -o /dev/null -w "HTTP %{http_code}\n" https://cost.minhojan-world.site/
