@@ -64,7 +64,7 @@ public class DataBootstrap implements CommandLineRunner {
         if (employeeRepo.count() < 40) { log.info("Seeding 50 employees..."); seedEmployeesFast(); }
         if (projectRepo.count() < 15) { log.info("Seeding 20 projects..."); seedProjectsFast(); }
         if (rateRepo.count() < 70) seedStandardRatesFast();
-        if (timesheetRepo.count() < 500) { log.info("Seeding timesheets (JDBC batch)..."); seedTimesheetsFast(); }
+        if (timesheetRepo.count() < 200) { log.info("Seeding timesheets (JDBC batch)..."); seedTimesheetsFast(); }
         if (costItemRepo.count() < 30) { log.info("Seeding cost items..."); seedCostItemsFast(); }
         if (allocationRepo.count() < 20) { log.info("Seeding allocations..."); seedAllocationsFast(); }
         if (auditLogRepo.count() < 100) seedAuditLogsFast();

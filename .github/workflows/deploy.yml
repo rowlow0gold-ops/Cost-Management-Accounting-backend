@@ -1,0 +1,43 @@
+name: Deploy Cost Backend
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build & Deploy (home server)
+    runs-on: [self-hosted, home]
+    steps:
+      - name: Sync source on home server
+        run: |
+          cd /home/jj/apps/Cost-Management-Accounting-backend
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Rebuild & restart backend (Spring Boot — slow)
+        run: |
+          cd /home/jj/apps/stack
+          docker compose --env-file .env build cost-backend
+          docker compose --env-file .env up -d --no-deps cost-backend
+
+      - name: Wait for startup
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://cost-backend:8080/api/auth/login -X POST -H "Content-Type: application/json" -d '{}' > /dev/null 2>&1; then
+              echo "Backend healthy after ${i}x2s"
+              exit 0
+            fi
+            if curl -fsS -o /dev/null http://cost-backend:8080/ 2>&1 | grep -qE "200|403"; then
+              echo "Backend responding after ${i}x2s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend failed health check"
+          exit 1
