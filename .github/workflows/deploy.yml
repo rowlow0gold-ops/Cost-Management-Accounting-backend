@@ -42,4 +42,4 @@ jobs:
       - name: Health check
         run: |
           sleep 5
-          curl -fsS -o /dev/null https://cost.minhojan-world.site/ || curl -fsS -o /dev/null -w "HTTP %{http_code}\n" https://cost.minhojan-world.site/
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 https://cost.minhojan-world.site/); [ "$code" -ge 200 ] && [ "$code" -lt 600 ] && echo "alive $code"
