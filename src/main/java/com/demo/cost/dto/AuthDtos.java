@@ -16,16 +16,28 @@ public class AuthDtos {
         private String email;
         private String password;
         private String name;
-        private String role;            // ADMIN / MANAGER / USER
+        private String role;
         private Long departmentId;
     }
 
     @Getter @Setter
     public static class LoginResponse {
-        private String token;
+        private String token;         // short-lived access token
+        private String refreshToken;  // long-lived rotating refresh
         private String email;
         private String name;
         private String role;
         private Long departmentId;
+    }
+
+    @Getter @Setter
+    public static class RefreshRequest {
+        private String refreshToken;
+    }
+
+    @Getter @Setter
+    public static class TokenPair {
+        private String token;
+        private String refreshToken;
     }
 }

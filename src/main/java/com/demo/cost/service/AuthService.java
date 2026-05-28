@@ -6,6 +6,8 @@ import com.demo.cost.dto.AuthDtos.*;
 import com.demo.cost.repository.DepartmentRepository;
 import com.demo.cost.repository.UserRepository;
 import com.demo.cost.security.JwtService;
+import com.demo.cost.security.RefreshTokenService;
+import com.demo.cost.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,7 @@ public class AuthService {
     private final DepartmentRepository departmentRepo;
     private final PasswordEncoder encoder;
     private final JwtService jwt;
+    private final RefreshTokenService refreshTokens;
 
     @Transactional
     public LoginResponse register(RegisterRequest req) {
@@ -76,10 +79,25 @@ public class AuthService {
     private LoginResponse toLoginResponse(User u) {
         LoginResponse r = new LoginResponse();
         r.setToken(jwt.generate(u.getEmail(), u.getRole().name(), u.getId()));
+        r.setRefreshToken(refreshTokens.issue(u.getId()));
         r.setEmail(u.getEmail());
         r.setName(u.getName());
         r.setRole(u.getRole().name());
         r.setDepartmentId(u.getDepartment() == null ? null : u.getDepartment().getId());
         return r;
+    }
+
+    /** Validate the given refresh token, rotate it, return a new (access, refresh) pair. */
+    public TokenPair refresh(String rawRefresh) {
+        Long userId = refreshTokens.consume(rawRefresh);
+        User u = userRepo.findById(userId).orElseThrow(() -> new IllegalArgumentException("User no longer exists"));
+        TokenPair pair = new TokenPair();
+        pair.setToken(jwt.generate(u.getEmail(), u.getRole().name(), u.getId()));
+        pair.setRefreshToken(refreshTokens.issue(u.getId()));
+        return pair;
+    }
+
+    public void logout(String rawRefresh) {
+        if (rawRefresh != null && !rawRefresh.isBlank()) refreshTokens.revoke(rawRefresh);
     }
 }

@@ -22,4 +22,15 @@ public class AuthController {
     public ResponseEntity<LoginResponse> register(@RequestBody RegisterRequest req) {
         return ResponseEntity.ok(authService.register(req));
     }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<TokenPair> refresh(@RequestBody RefreshRequest req) {
+        return ResponseEntity.ok(authService.refresh(req.getRefreshToken()));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@RequestBody(required = false) RefreshRequest req) {
+        if (req != null) authService.logout(req.getRefreshToken());
+        return ResponseEntity.noContent().build();
+    }
 }
