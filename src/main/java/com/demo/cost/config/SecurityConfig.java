@@ -1,6 +1,7 @@
 package com.demo.cost.config;
 
 import com.demo.cost.security.JwtAuthFilter;
+import com.demo.cost.security.LoginRateLimitFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -25,6 +26,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final LoginRateLimitFilter loginRateLimitFilter;
 
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
@@ -57,6 +59,7 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .headers(h -> h.frameOptions(f -> f.disable())) // h2 console
+            .addFilterBefore(loginRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
