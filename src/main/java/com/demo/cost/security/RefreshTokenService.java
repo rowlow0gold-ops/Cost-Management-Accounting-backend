@@ -53,13 +53,25 @@ public class RefreshTokenService {
         return raw;
     }
 
-    /** Validate raw token, mark it revoked (rotation), return its user id. */
+    /** Validate raw token, mark it revoked (rotation), return its user id.
+     *
+     *  REUSE DETECTION: if the token presented has already been revoked, that
+     *  almost certainly means it was stolen and replayed. We can't tell which
+     *  party (legit user or attacker) used the now-rotated copy, so the safe
+     *  thing is to revoke EVERY refresh token for that user. Both parties get
+     *  logged out; the legit user re-logs in, the attacker is locked out. */
     @Transactional
     public Long consume(String raw) {
         RefreshToken rt = repo.findByTokenHash(hash(raw))
                 .orElseThrow(() -> new IllegalArgumentException("Invalid refresh token"));
-        if (rt.isRevoked()) throw new IllegalArgumentException("Refresh token revoked");
-        if (rt.getExpiresAt().isBefore(Instant.now())) throw new IllegalArgumentException("Refresh token expired");
+        if (rt.isRevoked()) {
+            // Replay detected — nuke every active token for this user.
+            repo.deleteAllByUserId(rt.getUserId());
+            throw new IllegalArgumentException("Refresh token replay detected — all sessions revoked");
+        }
+        if (rt.getExpiresAt().isBefore(Instant.now())) {
+            throw new IllegalArgumentException("Refresh token expired");
+        }
         rt.setRevoked(true);
         repo.save(rt);
         return rt.getUserId();
