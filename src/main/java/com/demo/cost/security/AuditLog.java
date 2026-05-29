@@ -5,6 +5,8 @@ import com.demo.cost.repository.AuditEventRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -14,6 +16,7 @@ public class AuditLog {
 
     private final AuditEventRepository repo;
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(String email, String action, boolean success, String details) {
         String ip = null;
         try {

@@ -91,7 +91,9 @@ public class AuthService {
             u.setLockedUntil(null);
             userRepo.save(u);
         }
-        return toLoginResponse(u);
+        LoginResponse resp = toLoginResponse(u);
+        audit.record(u.getEmail(), "LOGIN_SUCCESS", true, null);
+        return resp;
     }
 
     private LoginResponse toLoginResponse(User u) {
