@@ -12,6 +12,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import com.demo.cost.security.UploadGuard;
 
 import java.util.List;
 
@@ -74,6 +75,7 @@ public class CostController {
 
     @PostMapping("/transfers/validate")
     public java.util.Map<String, Object> validateTransfers(@RequestParam("file") MultipartFile file) throws java.io.IOException {
+        UploadGuard.requireExcel(file);
         int valid = transferImport.validateExcel(file);
         return java.util.Map.of("valid", valid);
     }
@@ -83,6 +85,7 @@ public class CostController {
     public java.util.Map<String, Object> importTransfers(
             @RequestParam("file") MultipartFile file,
             @RequestParam(defaultValue = "MERGE") String mode) throws java.io.IOException {
+        UploadGuard.requireExcel(file);
         int count = transferImport.importFromExcel(file, mode);
         return java.util.Map.of("message", count + "건 등록 완료", "imported", count);
     }

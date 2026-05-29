@@ -25,8 +25,21 @@ public class AuthService {
     private final JwtService jwt;
     private final RefreshTokenService refreshTokens;
 
+    private static final java.util.regex.Pattern PW_LETTER = java.util.regex.Pattern.compile("[A-Za-z]");
+    private static final java.util.regex.Pattern PW_DIGIT  = java.util.regex.Pattern.compile("[0-9]");
+
+    private void validatePasswordStrength(String pw) {
+        if (pw == null || pw.length() < 12) {
+            throw new IllegalArgumentException("비밀번호는 12자 이상이어야 합니다");
+        }
+        if (!PW_LETTER.matcher(pw).find() || !PW_DIGIT.matcher(pw).find()) {
+            throw new IllegalArgumentException("비밀번호는 영문과 숫자를 모두 포함해야 합니다");
+        }
+    }
+
     @Transactional
     public LoginResponse register(RegisterRequest req) {
+        validatePasswordStrength(req.getPassword());
         if (userRepo.existsByEmail(req.getEmail())) {
             throw new IllegalArgumentException("이미 가입된 이메일입니다");
         }

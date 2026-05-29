@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import com.demo.cost.security.UploadGuard;
 
 import java.security.Principal;
 import java.util.Map;
@@ -92,6 +93,7 @@ public class TimesheetController {
     @PostMapping("/validate")
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
     public ResponseEntity<?> validateExcel(@RequestParam("file") MultipartFile file) {
+        UploadGuard.requireExcel(file);
         try {
             int count = service.validateExcel(file);
             return ResponseEntity.ok(Map.of("valid", count, "message", count + "건 검증 완료"));
@@ -105,6 +107,7 @@ public class TimesheetController {
     public ResponseEntity<?> importExcel(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "mode", defaultValue = "MERGE") String mode) {
+        UploadGuard.requireExcel(file);
         try {
             int count = service.importFromExcel(file, mode);
             return ResponseEntity.ok(Map.of("imported", count, "message", count + "건이 등록되었습니다."));
