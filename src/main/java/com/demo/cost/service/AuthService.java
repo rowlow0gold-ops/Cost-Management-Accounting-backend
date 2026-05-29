@@ -7,6 +7,7 @@ import com.demo.cost.repository.DepartmentRepository;
 import com.demo.cost.repository.UserRepository;
 import com.demo.cost.security.JwtService;
 import com.demo.cost.security.RefreshTokenService;
+import com.demo.cost.security.AuditLog;
 import com.demo.cost.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -24,6 +25,7 @@ public class AuthService {
     private final PasswordEncoder encoder;
     private final JwtService jwt;
     private final RefreshTokenService refreshTokens;
+    private final AuditLog audit;
 
     private static final java.util.regex.Pattern PW_LETTER = java.util.regex.Pattern.compile("[A-Za-z]");
     private static final java.util.regex.Pattern PW_DIGIT  = java.util.regex.Pattern.compile("[0-9]");
@@ -52,6 +54,7 @@ public class AuthService {
                 : departmentRepo.findById(req.getDepartmentId()).orElse(null))
             .build();
         userRepo.save(u);
+        audit.record(u.getEmail(), "REGISTER", true, "role=" + u.getRole().name());
         return toLoginResponse(u);
     }
 
@@ -66,6 +69,7 @@ public class AuthService {
         // Account currently locked?
         if (u.getLockedUntil() != null && u.getLockedUntil().isAfter(Instant.now())) {
             long mins = Duration.between(Instant.now(), u.getLockedUntil()).toMinutes() + 1;
+            audit.record(req.getEmail(), "LOGIN_LOCKED", false, "minutes_remaining=" + mins);
             throw new IllegalArgumentException("계정이 잠겼습니다. " + mins + "분 후 다시 시도하세요.");
         }
 
@@ -77,6 +81,7 @@ public class AuthService {
                 u.setFailedAttempts(0); // reset counter; lock takes over
             }
             userRepo.save(u);
+            audit.record(req.getEmail(), "LOGIN_FAILURE", false, "attempts=" + u.getFailedAttempts());
             throw new IllegalArgumentException("이메일 또는 비밀번호가 올바르지 않습니다");
         }
 
